@@ -9,10 +9,24 @@
 
 'use strict';
 
+// ── Detect base path for GitHub Pages ─────────────────────────────────────────
+// When deployed to GitHub Pages as https://sudhi7seas.github.io/drishti/
+// the base is '/drishti/'. On localhost or a root domain it is '/'.
+const _BASE = (() => {
+  const path = window.location.pathname;
+  // Extract '/reponame/' prefix if present
+  const m = path.match(/^(\/[^/]+\/)/);
+  // If we're at a sub-path (GitHub Pages repo site), use it; otherwise use '/'
+  return (m && m[1] !== '/index.html') ? m[1] : '/';
+})();
+
 const APP_CONFIG = Object.freeze({
   // App metadata
   name: 'SeeForMe',
   version: '0.1.0',
+
+  // Resolved base path (e.g. '/drishti/' on GitHub Pages, '/' locally)
+  base: _BASE,
 
   // AI Model options (on-device, no cloud)
   models: {
@@ -81,9 +95,7 @@ const APP_CONFIG = Object.freeze({
     longPressThreshold: 700,
   },
 
-  // Content Security: allowed origins for fetch (none needed — fully offline)
-  // All model downloads happen via Transformers.js CDN on first load
-  // and are then cached by the service worker
+  // Content Security: allowed origins for fetch
   allowedOrigins: [
     'https://cdn.jsdelivr.net',         // Transformers.js CDN
     'https://huggingface.co',           // Model weights
