@@ -1,0 +1,35 @@
+{
+  "name": "SeeForMe – Visual Assistant",
+  "short_name": "SeeForMe",
+  "description": "On-device visual assistant for blind and low-vision users. Describes scenes, reads text, and answers questions about what the camera sees. No internet required after first load.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0A0E1A",
+  "theme_color": "#0A0E1A",
+  "lang": "en",
+  "categories": ["accessibility", "utilities"],
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Describe Scene",
+      "short_name": "Describe",
+      "description": "Tap to describe what the camera sees",
+      "url": "/?action=describe",
+      "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0A0E1A" />
+  <meta name="description" content="SeeForMe – On-device visual assistant for blind and low-vision users. No internet required." />
+
+  <!-- PWA manifest -->
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- iOS PWA support -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="SeeForMe" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+
+  <!-- Security headers via meta (additional layer) -->
+  <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+  <meta http-equiv="X-Frame-Options" content="DENY" />
+
+  <title>SeeForMe — On-Device Visual Assistant</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <!-- Skip to content for screen readers -->
+  <a href="#main-action" class="skip-link">Skip to main action</a>
+
+  <!-- ── SPLASH / LOADING SCREEN ── -->
+  <div id="splash" role="status" aria-live="polite" aria-label="Loading SeeForMe">
+    <div class="splash-inner">
+      <div class="splash-icon" aria-hidden="true">
+        <svg width="72" height="72" viewBox="0 0 72 72" fill="none">
+          <circle cx="36" cy="36" r="34" stroke="#00D4FF" stroke-width="2" opacity="0.3"/>
+          <circle cx="36" cy="36" r="22" stroke="#00D4FF" stroke-width="2" opacity="0.6"/>
+          <circle cx="36" cy="36" r="10" fill="#00D4FF"/>
+          <circle cx="36" cy="36" r="4" fill="#0A0E1A"/>
+        </svg>
+      </div>
+      <h1 class="splash-title">SeeForMe</h1>
+      <p class="splash-sub">Loading AI model…</p>
+      <div class="splash-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+        <div class="splash-bar-fill" id="loadProgress"></div>
+      </div>
+      <p class="splash-status" id="loadStatus">Initialising…</p>
+    </div>
+  </div>
+
+  <!-- ── MAIN APP ── -->
+  <main id="app" class="app hidden" role="main">
+
+    <!-- Header -->
+    <header class="app-header" role="banner">
+      <div class="header-left">
+        <span class="app-name" aria-label="SeeForMe app">SeeForMe</span>
+        <span class="model-badge" id="modelBadge" aria-live="polite">Model loading…</span>
+      </div>
+      <div class="header-right">
+        <button class="icon-btn" id="settingsBtn" aria-label="Open settings" aria-expanded="false" aria-controls="settingsPanel">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Live Announcements (screen reader) -->
+    <div id="liveRegion" aria-live="assertive" aria-atomic="true" class="sr-only"></div>
+    <div id="politeRegion" aria-live="polite" aria-atomic="false" class="sr-only"></div>
+
+    <!-- ── CAMERA FEED ── -->
+    <section class="camera-section" aria-label="Camera viewfinder">
+      <video id="cameraFeed" autoplay playsinline muted aria-label="Live camera feed" class="camera-video"></video>
+      <canvas id="captureCanvas" class="hidden" aria-hidden="true"></canvas>
+
+      <!-- Overlay: hazard alert banner -->
+      <div class="hazard-banner hidden" id="hazardBanner" role="alert" aria-live="assertive">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13" stroke="#0A0E1A" stroke-width="2"/>
+          <line x1="12" y1="17" x2="12.01" y2="17" stroke="#0A0E1A" stroke-width="2"/>
+        </svg>
+        <span id="hazardText">Hazard detected</span>
+      </div>
+
+      <!-- Camera status overlay -->
+      <div class="camera-status" id="cameraStatus" aria-live="polite">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#00D4FF" stroke-width="1.5" aria-hidden="true">
+          <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+        </svg>
+        <span>Camera off</span>
+      </div>
+    </section>
+
+    <!-- ── RESPONSE AREA ── -->
+    <section class="response-section" aria-label="AI description output" aria-live="polite">
+      <div class="response-card" id="responseCard">
+        <div class="response-header">
+          <span class="response-label" id="responseLabel">Ready</span>
+          <span class="confidence-badge hidden" id="confidenceBadge" aria-label="Confidence level"></span>
+        </div>
+        <p class="response-text" id="responseText" aria-live="polite">
+          Tap the big button below to describe what the camera sees.
+        </p>
+        <div class="response-actions hidden" id="responseActions">
+          <button class="text-btn" id="replayBtn" aria-label="Replay last description">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/></svg>
+            Replay
+          </button>
+          <button class="text-btn" id="copyBtn" aria-label="Copy description to clipboard">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Copy
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── MAIN ACTION BUTTONS ── -->
+    <section class="action-section" aria-label="Main controls" id="main-action">
+
+      <!-- Primary: Describe scene -->
+      <div class="primary-action-wrap">
+        <button
+          class="primary-btn"
+          id="describeBtn"
+          aria-label="Tap to describe what the camera sees. Double-tap to read text. Long press to ask a question."
+          aria-describedby="btnHint"
+        >
+          <div class="sonar-ring ring-1" aria-hidden="true"></div>
+          <div class="sonar-ring ring-2" aria-hidden="true"></div>
+          <div class="sonar-ring ring-3" aria-hidden="true"></div>
+          <div class="btn-icon" aria-hidden="true">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </div>
+          <span class="btn-label">Describe</span>
+        </button>
+        <p class="btn-hint" id="btnHint" aria-hidden="true">Tap · Double-tap reads text · Hold to ask</p>
+      </div>
+
+      <!-- Secondary controls -->
+      <div class="secondary-controls" role="group" aria-label="Secondary actions">
+        <button class="secondary-btn" id="readTextBtn" aria-label="Read text only – read all visible text in the scene">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
+          </svg>
+          <span>Read Text</span>
+        </button>
+
+        <button class="secondary-btn" id="cameraToggleBtn" aria-label="Toggle camera on or off" aria-pressed="false">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/>
+          </svg>
+          <span>Camera</span>
+        </button>
+
+        <button class="secondary-btn" id="voiceInputBtn" aria-label="Ask a question by voice" aria-pressed="false">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
+          <span>Ask</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ── VOICE INPUT OVERLAY ── -->
+    <div class="voice-overlay hidden" id="voiceOverlay" role="dialog" aria-modal="true" aria-label="Voice question input">
+      <div class="voice-modal">
+        <div class="voice-wave" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <p class="voice-prompt" id="voicePromptText">Listening…</p>
+        <p class="voice-transcript" id="voiceTranscript" aria-live="polite"></p>
+        <button class="cancel-btn" id="cancelVoiceBtn" aria-label="Cancel voice input">Cancel</button>
+      </div>
+    </div>
+
+    <!-- ── SETTINGS PANEL ── -->
+    <aside class="settings-panel hidden" id="settingsPanel" role="dialog" aria-modal="true" aria-label="Settings">
+      <div class="settings-inner">
+        <div class="settings-header">
+          <h2 class="settings-title">Settings</h2>
+          <button class="icon-btn" id="closeSettingsBtn" aria-label="Close settings">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="settings-body">
+
+          <div class="setting-group">
+            <h3 class="setting-group-title">Speech</h3>
+            <label class="setting-row" for="speechRate">
+              <span class="setting-label">Reading speed</span>
+              <div class="setting-control">
+                <input type="range" id="speechRate" min="0.5" max="2.5" step="0.1" value="1.1" aria-valuetext="Normal speed" class="range-input"/>
+                <span class="range-value" id="speechRateVal">1.1×</span>
+              </div>
+            </label>
+            <label class="setting-row" for="speechPitch">
+              <span class="setting-label">Pitch</span>
+              <div class="setting-control">
+                <input type="range" id="speechPitch" min="0.5" max="2" step="0.1" value="1" class="range-input"/>
+                <span class="range-value" id="speechPitchVal">1.0</span>
+              </div>
+            </label>
+            <label class="setting-row" for="voiceSelect">
+              <span class="setting-label">Voice</span>
+              <select id="voiceSelect" class="select-input" aria-label="Choose speech voice"></select>
+            </label>
+          </div>
+
+          <div class="setting-group">
+            <h3 class="setting-group-title">Response Style</h3>
+            <label class="setting-row toggle-row" for="briefMode">
+              <span class="setting-label">Brief mode <small>Short, terse answers</small></span>
+              <button class="toggle-btn" id="briefMode" role="switch" aria-checked="false" aria-label="Brief mode">
+                <span class="toggle-knob"></span>
+              </button>
+            </label>
+            <label class="setting-row toggle-row" for="hazardAlert">
+              <span class="setting-label">Hazard alerts <small>Announce dangers first</small></span>
+              <button class="toggle-btn active" id="hazardAlert" role="switch" aria-checked="true" aria-label="Hazard alerts">
+                <span class="toggle-knob"></span>
+              </button>
+            </label>
+            <label class="setting-row toggle-row" for="autoDescribe">
+              <span class="setting-label">Auto-describe <small>Describe every 5 seconds</small></span>
+              <button class="toggle-btn" id="autoDescribe" role="switch" aria-checked="false" aria-label="Auto-describe">
+                <span class="toggle-knob"></span>
+              </button>
+            </label>
+          </div>
+
+          <div class="setting-group">
+            <h3 class="setting-group-title">AI Model</h3>
+            <div class="model-info-card">
+              <div class="model-info-row">
+                <span class="model-info-label">Current model</span>
+                <span class="model-info-val" id="settingsModelName">Loading…</span>
+              </div>
+              <div class="model-info-row">
+                <span class="model-info-label">Status</span>
+                <span class="model-info-val" id="settingsModelStatus">–</span>
+              </div>
+              <div class="model-info-row">
+                <span class="model-info-label">Mode</span>
+                <span class="model-info-val">On-device · No internet needed</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="setting-group">
+            <h3 class="setting-group-title">About</h3>
+            <p class="about-text">SeeForMe runs entirely on your device. No photos are sent to any server. All AI processing happens locally in your browser.</p>
+            <p class="version-text">Version 0.1.0 · Built with Transformers.js</p>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Settings backdrop -->
+    <div class="overlay-backdrop hidden" id="settingsBackdrop" aria-hidden="true"></div>
+
+  </main>
+
+  <!-- ── SCRIPTS ── -->
+  <script src="js/config.js"></script>
+  <script src="js/speech.js"></script>
+  <script src="js/camera.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/app.js"></script>
+
+  <!-- Service Worker registration -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js')
+          .then(reg => console.log('[SW] Registered:', reg.scope))
+          .catch(err => console.warn('[SW] Registration failed:', err));
+      });
+    }
+  </script>
+</body>
+</html>
