@@ -81,11 +81,11 @@ export const UIModule = (() => {
     if (sub) sub.textContent = 'First-time setup (Wi-Fi needed)…';
   }
 
-  function hideSplash() {
+  function hideSplash(instant = false) {
     const splash = document.getElementById('splash');
     const app = document.getElementById('app');
     if (!splash) return;
-    splash.classList.add('fade-out');
+    if (instant) { splash.style.display = "none"; app?.classList.remove("hidden"); return; } splash.classList.add("fade-out");
     setTimeout(() => {
       splash.style.display = 'none';
       app?.classList.remove('hidden');

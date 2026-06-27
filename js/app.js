@@ -1,10 +1,19 @@
 /**
- * Drishti — App v0.1.3
- * Added: voice test, updated event names to drishti:*
+ * Drishti — App v0.1.4
+ *
+ * iOS RESTART FIX:
+ * iOS Safari kills PWA JS state when the app goes to background.
+ * When user returns, it reloads the page (triggering the full splash again).
+ * We can't prevent the reload, but we CAN make it fast:
+ * - sessionStorage flag 'modelReady' skips the splash if model is cached
+ * - On return, we jump straight to the app UI, reload model silently
+ * - visibilitychange listener re-initialises camera when app comes back
  */
 
-export async function boot({ pipeline, APP_CONFIG, SpeechModule, CameraModule, CameraError, AIModule, AIError, UIModule }) {
-
+export async function boot({
+  pipeline, APP_CONFIG, SpeechModule, CameraModule,
+  CameraError, AIModule, AIError, UIModule
+}) {
   UIModule.init();
   SpeechModule.init();
   AIModule.setPipelineFn(pipeline);
@@ -13,36 +22,76 @@ export async function boot({ pipeline, APP_CONFIG, SpeechModule, CameraModule, C
   document.addEventListener('drishti:speechPitch', e => SpeechModule.setPitch(e.detail));
   document.addEventListener('drishti:testVoice',   () => SpeechModule.testVoice());
 
-  UIModule.updateLoadProgress(5, 'Checking device storage…');
+  // ── Check if model was already loaded this session (iOS fast-resume) ──
+  const fastResume = sessionStorage.getItem('drishti_model_ready') === '1';
 
-  const cached = await AIModule.isModelCached(APP_CONFIG.models.primary.id);
-  if (!cached) UIModule.showFirstTimeNotice();
+  if (fastResume) {
+    // Show app immediately without splash — model will load silently
+    UIModule.hideSplash(true); // instant, no animation
+    UIModule.setResponseReady('Resuming… tap Describe when ready.');
+  } else {
+    UIModule.updateLoadProgress(5, 'Checking device storage…');
+    const cached = await AIModule.isModelCached(APP_CONFIG.models.primary.id);
+    if (!cached) UIModule.showFirstTimeNotice();
+  }
 
+  // Load model (fast from cache, or download first time)
   try {
-    const result = await AIModule.loadModel(APP_CONFIG, p => UIModule.updateLoadProgress(p.percent, p.status));
+    const result = await AIModule.loadModel(APP_CONFIG, fastResume ? null : p => {
+      UIModule.updateLoadProgress(p.percent, p.status);
+    });
+
+    // Mark model as ready for this session — survives iOS background/resume
+    sessionStorage.setItem('drishti_model_ready', '1');
     UIModule.setModelBadge(result.modelLabel, result.fromCache ? 'from device' : 'downloaded');
+
   } catch (err) {
+    sessionStorage.removeItem('drishti_model_ready');
     UIModule.showSplashError(err.message);
     UIModule.announce(err.message);
     return;
   }
 
-  UIModule.hideSplash();
-  UIModule.setResponseReady();
+  if (!fastResume) {
+    UIModule.hideSplash(false);
+    UIModule.setResponseReady();
+  } else {
+    UIModule.setResponseReady();
+  }
+
   _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIModule, AIError, UIModule });
 
+  // Start camera
   try {
     await CameraModule.start();
     UIModule.setCameraToggleState(true);
-    UIModule.toast('Camera ready', 'success', 2000);
+    if (!fastResume) UIModule.toast('Camera ready', 'success', 2000);
   } catch (err) {
     UIModule.toast('Tap Camera to enable', 'info', 4000);
   }
 
-  // Greet user after short delay
-  setTimeout(() => {
-    SpeechModule.speak('Drishti is ready. Tap the large button to describe what you see.');
-  }, 1200);
+  if (!fastResume) {
+    setTimeout(() => {
+      SpeechModule.speak('Drishti is ready. Tap the large button to describe what you see.');
+    }, 1200);
+  }
+
+  // ── iOS visibility fix: re-init camera when app comes back ──────
+  // iOS kills camera stream when app backgrounds; restart it on return
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'visible') {
+      if (!CameraModule.isActive) {
+        try {
+          await CameraModule.start();
+          UIModule.setCameraToggleState(true);
+        } catch { /* user may have denied — ignore */ }
+      }
+    } else {
+      // App going to background — stop camera to free resources & battery
+      CameraModule.stop();
+      UIModule.setCameraToggleState(false);
+    }
+  });
 }
 
 function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIModule, AIError, UIModule }) {
@@ -57,7 +106,7 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
   const replayBtn       = document.getElementById('replayBtn');
   const copyBtn         = document.getElementById('copyBtn');
 
-  // ── Gesture: tap / double-tap / long-press ──
+  // ── Gesture: tap / double-tap / long-press ──────────────────────
   describeBtn?.addEventListener('pointerdown', (e) => {
     if (_isProcessing) return;
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -123,7 +172,7 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
     }
   });
 
-  // ── Core actions ──────────────────────────────
+  // ── Core actions ────────────────────────────────────────────────
   async function triggerDescribe() {
     if (_isProcessing || !_guard()) return;
     _isProcessing = true;
@@ -189,7 +238,9 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
   }
 
   function _guard() {
-    if (!AIModule.isReady) { UIModule.toast('Model loading, please wait…', 'warning'); return false; }
+    if (!AIModule.isReady) {
+      UIModule.toast('Model loading, please wait…', 'warning'); return false;
+    }
     if (!CameraModule.isActive) {
       const msg = 'Camera is off. Tap Camera to enable.';
       UIModule.toast(msg, 'warning'); SpeechModule.speak(msg); return false;
@@ -201,7 +252,8 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
     let msg = 'Something went wrong. Please try again.';
     if (err instanceof AIError) {
       if (err.code === 'NOT_READY') msg = 'Model not ready yet.';
-      else if (err.code === 'INFERENCE_FAILED') msg = 'Could not process image. Try again.';
+      else if (err.code === 'INFERENCE_FAILED') msg = err.message;
+      else if (err.code === 'EMPTY_RESPONSE') msg = err.message;
       else msg = err.message;
     } else if (err instanceof CameraError) { msg = err.message; }
     UIModule.setResponseError(msg);
