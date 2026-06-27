@@ -479,3 +479,49 @@ body {
   .primary-btn.processing .btn-icon svg { animation: none !important; }
   * { transition-duration: 10ms !important; }
 }
+
+/* ── Install banner ── */
+.install-banner {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+  background: linear-gradient(135deg, #0F2040, #162038);
+  border-bottom: 1px solid var(--cyan-400);
+  padding: 12px 16px;
+  padding-top: max(12px, env(safe-area-inset-top));
+  animation: slide-down 300ms ease;
+}
+@keyframes slide-down { from { transform: translateY(-100%); } to { transform: translateY(0); } }
+
+.install-banner-inner {
+  display: flex; align-items: center; gap: 12px; max-width: 500px; margin: 0 auto;
+}
+.install-banner-icon { font-size: 1.4rem; flex-shrink: 0; }
+.install-banner-text { flex: 1; }
+.install-banner-text strong { display: block; font-size: 0.9rem; color: var(--cyan-400); }
+.install-banner-text span { font-size: 0.78rem; color: var(--white-60); }
+.install-banner-close {
+  background: none; border: none; color: var(--white-40);
+  font-size: 1rem; cursor: pointer; padding: 8px; flex-shrink: 0;
+  min-width: 40px; min-height: 40px;
+}
+
+/* ── Install instructions in settings ── */
+.install-instructions { display: flex; flex-direction: column; gap: 14px; }
+.install-step {
+  background: var(--navy-700); border: 1px solid var(--white-10);
+  border-radius: var(--radius-md); padding: 14px 16px;
+}
+.install-step-title { font-size: 0.88rem; font-weight: 600; color: var(--cyan-300); margin-bottom: 10px; }
+.install-step-list { padding-left: 18px; }
+.install-step-list li { font-size: 0.82rem; color: var(--white-60); line-height: 1.7; }
+.install-step-list li strong { color: var(--white-100); }
+
+.install-btn {
+  display: none; /* hidden until Android prompt available */
+  width: 100%; padding: 14px; margin-top: 4px;
+  background: var(--cyan-400); border: none;
+  border-radius: var(--radius-md); color: var(--navy-900);
+  font-family: var(--font-ui); font-size: 0.95rem; font-weight: 700;
+  cursor: pointer; transition: all var(--transition);
+}
+.install-btn.visible { display: block; }
+.install-btn:hover { background: var(--cyan-300); }
