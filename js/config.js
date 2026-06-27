@@ -1,105 +1,67 @@
 /**
- * SeeForMe — App Configuration
- * Chapter 1: Configuration & Constants
- *
- * All config is static/public-safe. No API keys here.
- * Any sensitive values must NEVER be added to this file
- * (this is a client-side only app — there is no backend).
+ * Drishti — Configuration
+ * All app-wide constants in one place. No secrets here.
  */
 
-'use strict';
+export const APP_CONFIG = Object.freeze({
+  name: 'Drishti',
+  version: '0.1.1',
 
-// ── Detect base path for GitHub Pages ─────────────────────────────────────────
-// When deployed to GitHub Pages as https://sudhi7seas.github.io/drishti/
-// the base is '/drishti/'. On localhost or a root domain it is '/'.
-const _BASE = (() => {
-  const path = window.location.pathname;
-  // Extract '/reponame/' prefix if present
-  const m = path.match(/^(\/[^/]+\/)/);
-  // If we're at a sub-path (GitHub Pages repo site), use it; otherwise use '/'
-  return (m && m[1] !== '/index.html') ? m[1] : '/';
-})();
-
-const APP_CONFIG = Object.freeze({
-  // App metadata
-  name: 'SeeForMe',
-  version: '0.1.0',
-
-  // Resolved base path (e.g. '/drishti/' on GitHub Pages, '/' locally)
-  base: _BASE,
-
-  // AI Model options (on-device, no cloud)
   models: {
-    // Primary: SmolVLM-500M — small enough for most phones
+    // Primary: Moondream2 — small VLM with ONNX files, works with Transformers.js
     primary: {
-      id: 'HuggingFaceTB/SmolVLM-500M-Instruct',
-      label: 'SmolVLM 500M',
+      id: 'Xenova/moondream2',
+      label: 'Moondream2',
+      task: 'image-to-text',
       minRAM_GB: 2,
     },
-    // Fallback: even smaller captioning model
+    // Fallback: ViT-GPT2 — pure image captioning, very reliable
     fallback: {
       id: 'Xenova/vit-gpt2-image-captioning',
-      label: 'ViT-GPT2 Caption',
+      label: 'ViT-GPT2',
+      task: 'image-to-text',
       minRAM_GB: 1,
     },
   },
 
-  // How to talk to the model
   prompts: {
     describeScene: (brief = false) => brief
-      ? 'Describe this image in 1–2 short sentences. Focus on hazards, people, and objects. No filler phrases.'
-      : 'Describe what you see in this image. Mention: (1) any hazards like steps, vehicles, or obstacles, (2) people or animals, (3) text or signs, (4) the general environment. Be clear and direct. Start with the most important thing.',
-
-    readText: 'Read all text visible in this image. If no text is visible, say "No text found".',
-
-    askQuestion: (question) =>
-      `The user is blind or has low vision. Answer this question about the image: "${question}". Be specific, brief, and factual. Start with the direct answer.`,
+      ? 'Briefly describe this scene in 1-2 sentences. Mention any hazards first.'
+      : 'Describe what you see. Start with hazards like steps or vehicles, then people, then text, then the general scene.',
+    readText: 'Read all text visible in this image. If no text, say no text found.',
+    askQuestion: (q) => `Answer this question about the image: ${q}. Be brief and direct.`,
   },
 
-  // Hazard keywords to watch for (triggers amber banner + urgent TTS)
   hazardKeywords: [
-    'step', 'steps', 'stairs', 'curb', 'curbs', 'drop', 'vehicle', 'car', 'bus',
-    'truck', 'bicycle', 'cyclist', 'moving', 'obstacle', 'hazard', 'danger',
-    'edge', 'hole', 'gap', 'wet', 'slippery', 'blocked', 'warning',
+    'step', 'steps', 'stair', 'stairs', 'curb', 'drop', 'vehicle', 'car',
+    'bus', 'truck', 'bicycle', 'bike', 'moving', 'obstacle', 'edge',
+    'hole', 'gap', 'wet', 'slippery', 'warning', 'danger',
   ],
 
-  // Speech settings defaults
   speech: {
     defaultRate: 1.1,
     defaultPitch: 1.0,
     defaultVolume: 1.0,
-    urgentRate: 1.3,    // faster for hazard announcements
+    urgentRate: 1.3,
   },
 
-  // Camera settings
   camera: {
     width: { ideal: 1280 },
     height: { ideal: 720 },
-    facingMode: 'environment', // rear camera
+    facingMode: 'environment',
   },
 
-  // Capture settings
   capture: {
-    imageQuality: 0.82,
+    imageQuality: 0.85,
     imageType: 'image/jpeg',
-    captureWidth: 512,  // resize before sending to model (performance)
+    captureWidth: 512,
     captureHeight: 512,
   },
 
-  // Auto-describe interval (ms)
   autoDescribeInterval: 5000,
 
-  // Touch gesture timings (ms)
   gestures: {
     doubleTapThreshold: 350,
     longPressThreshold: 700,
   },
-
-  // Content Security: allowed origins for fetch
-  allowedOrigins: [
-    'https://cdn.jsdelivr.net',         // Transformers.js CDN
-    'https://huggingface.co',           // Model weights
-    'https://fonts.googleapis.com',     // Fonts (preloaded)
-    'https://fonts.gstatic.com',
-  ],
 });
