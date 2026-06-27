@@ -1,23 +1,17 @@
 /**
- * SeeForMe — Service Worker
- * Chapter 7: Offline Support & PWA Caching
- *
- * Caches the app shell so it loads offline.
- * Model weights are cached by Transformers.js separately (Cache API).
- *
- * Strategy:
- *  - App shell (HTML/CSS/JS/fonts): Cache-first
- *  - AI model downloads: Transformers.js manages these in its own cache
- *  - Everything else: Network-first with cache fallback
+ * Drishti — Service Worker v0.1.2
+ * FIX: Better caching strategy to prevent "starting from beginning" on iOS
+ * FIX: Correct handling of ES module scripts
  */
 
 'use strict';
 
-const CACHE_NAME = 'seeforme-v1';
-const CACHE_URLS = [
+const CACHE_NAME = 'drishti-v3';
+const APP_SHELL = [
   '/',
   '/index.html',
   '/css/style.css',
+  '/js/main.js',
   '/js/config.js',
   '/js/speech.js',
   '/js/camera.js',
@@ -25,76 +19,58 @@ const CACHE_URLS = [
   '/js/ui.js',
   '/js/app.js',
   '/manifest.json',
-  // Fonts (pre-cached)
-  'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
 ];
 
-// ── Install: cache app shell ───────────────────
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(CACHE_URLS))
+      .then(cache => cache.addAll(APP_SHELL))
       .then(() => self.skipWaiting())
-      .catch(err => console.warn('[SW] Pre-cache failed:', err))
+      .catch(err => console.warn('[SW] Pre-cache partial fail:', err))
   );
 });
 
-// ── Activate: clean old caches ─────────────────
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(
-        keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
-      ))
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
 
-// ── Fetch: serve from cache or network ─────────
 self.addEventListener('fetch', (e) => {
   const { request } = e;
   const url = new URL(request.url);
 
-  // Skip non-GET, chrome-extension, and data: URLs
   if (request.method !== 'GET') return;
-  if (url.protocol === 'chrome-extension:') return;
-  if (url.protocol === 'data:') return;
-
-  // Skip HuggingFace model weight requests (Transformers.js caches these itself)
+  if (url.protocol === 'chrome-extension:' || url.protocol === 'data:') return;
+  // Let Transformers.js manage HuggingFace model downloads itself
   if (url.hostname.includes('huggingface.co') || url.hostname.includes('cdn-lfs')) return;
-
-  // App shell: cache-first
-  const isAppShell = CACHE_URLS.some(u => request.url.endsWith(u) || request.url === u);
-  if (isAppShell || url.origin === self.location.origin) {
+  // Transformers.js CDN — network first, cache as backup
+  if (url.hostname.includes('jsdelivr.net')) {
     e.respondWith(
-      caches.match(request)
-        .then(cached => cached || fetch(request).then(resp => {
-          if (resp.ok) {
-            const clone = resp.clone();
-            caches.open(CACHE_NAME).then(c => c.put(request, clone));
-          }
-          return resp;
-        }))
-        .catch(() => {
-          // Offline fallback
-          if (request.destination === 'document') {
-            return caches.match('/index.html');
-          }
-        })
+      fetch(request).then(resp => {
+        if (resp.ok) caches.open(CACHE_NAME).then(c => c.put(request, resp.clone()));
+        return resp;
+      }).catch(() => caches.match(request))
     );
     return;
   }
 
-  // CDN resources (fonts, Transformers.js): network-first with cache fallback
+  // App shell: cache-first (this is what stops iOS reloading from scratch)
   e.respondWith(
-    fetch(request)
-      .then(resp => {
+    caches.match(request).then(cached => {
+      if (cached) return cached;
+      return fetch(request).then(resp => {
         if (resp.ok) {
-          const clone = resp.clone();
-          caches.open(CACHE_NAME).then(c => c.put(request, clone));
+          caches.open(CACHE_NAME).then(c => c.put(request, resp.clone()));
         }
         return resp;
-      })
-      .catch(() => caches.match(request))
+      }).catch(() => {
+        if (request.destination === 'document') return caches.match('/index.html');
+      });
+    })
   );
 });
