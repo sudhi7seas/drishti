@@ -1,6 +1,6 @@
 /**
- * Drishti — App Orchestration (ES Module)
- * Receives all modules injected from main.js
+ * Drishti — App v0.1.3
+ * Added: voice test, updated event names to drishti:*
  */
 
 export async function boot({ pipeline, APP_CONFIG, SpeechModule, CameraModule, CameraError, AIModule, AIError, UIModule }) {
@@ -9,20 +9,17 @@ export async function boot({ pipeline, APP_CONFIG, SpeechModule, CameraModule, C
   SpeechModule.init();
   AIModule.setPipelineFn(pipeline);
 
-  // Wire up speech setting events
-  document.addEventListener('seeforme:speechRate', e => SpeechModule.setRate(e.detail));
-  document.addEventListener('seeforme:speechPitch', e => SpeechModule.setPitch(e.detail));
+  document.addEventListener('drishti:speechRate',  e => SpeechModule.setRate(e.detail));
+  document.addEventListener('drishti:speechPitch', e => SpeechModule.setPitch(e.detail));
+  document.addEventListener('drishti:testVoice',   () => SpeechModule.testVoice());
 
   UIModule.updateLoadProgress(5, 'Checking device storage…');
 
-  // Check cache before loading
-  const alreadyCached = await AIModule.isModelCached(APP_CONFIG.models.primary.id);
-  if (!alreadyCached) UIModule.showFirstTimeNotice();
+  const cached = await AIModule.isModelCached(APP_CONFIG.models.primary.id);
+  if (!cached) UIModule.showFirstTimeNotice();
 
   try {
-    const result = await AIModule.loadModel(APP_CONFIG, (progress) => {
-      UIModule.updateLoadProgress(progress.percent, progress.status);
-    });
+    const result = await AIModule.loadModel(APP_CONFIG, p => UIModule.updateLoadProgress(p.percent, p.status));
     UIModule.setModelBadge(result.modelLabel, result.fromCache ? 'from device' : 'downloaded');
   } catch (err) {
     UIModule.showSplashError(err.message);
@@ -41,10 +38,16 @@ export async function boot({ pipeline, APP_CONFIG, SpeechModule, CameraModule, C
   } catch (err) {
     UIModule.toast('Tap Camera to enable', 'info', 4000);
   }
+
+  // Greet user after short delay
+  setTimeout(() => {
+    SpeechModule.speak('Drishti is ready. Tap the large button to describe what you see.');
+  }, 1200);
 }
 
 function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIModule, AIError, UIModule }) {
-  let _lastTapTime = 0, _longPressTimer = null, _autoDescribeTimer = null, _isProcessing = false, _lastResult = null;
+  let _lastTapTime = 0, _longPressTimer = null, _autoTimer = null;
+  let _isProcessing = false, _lastResult = null;
 
   const describeBtn     = document.getElementById('describeBtn');
   const readTextBtn     = document.getElementById('readTextBtn');
@@ -54,7 +57,7 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
   const replayBtn       = document.getElementById('replayBtn');
   const copyBtn         = document.getElementById('copyBtn');
 
-  // ── Gesture handling on describe button ──
+  // ── Gesture: tap / double-tap / long-press ──
   describeBtn?.addEventListener('pointerdown', (e) => {
     if (_isProcessing) return;
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -86,11 +89,18 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
       UIModule.setCameraToggleState(active);
       UIModule.toast(active ? 'Camera on' : 'Camera off', 'info', 1500);
       UIModule.announce(active ? 'Camera enabled' : 'Camera disabled', 'polite');
-    } catch (err) { UIModule.toast(err.message, 'error'); }
+    } catch (err) {
+      UIModule.toast(err.message, 'error');
+      UIModule.announce(err.message);
+    }
   });
 
   voiceInputBtn?.addEventListener('click', triggerVoice);
-  cancelVoiceBtn?.addEventListener('click', () => { SpeechModule.stopListening(); UIModule.hideVoiceOverlay(); });
+
+  cancelVoiceBtn?.addEventListener('click', () => {
+    SpeechModule.stopListening();
+    UIModule.hideVoiceOverlay();
+  });
 
   replayBtn?.addEventListener('click', () => {
     if (_lastResult) { SpeechModule.stop(); SpeechModule.speak(_lastResult, { interrupt: true }); }
@@ -102,12 +112,14 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
     catch { UIModule.toast('Copy not available', 'error'); }
   });
 
-  document.addEventListener('seeforme:autoDescribeToggle', (e) => {
-    if (e.detail.enabled) {
-      _autoDescribeTimer = setInterval(() => { if (!_isProcessing && CameraModule.isActive) triggerDescribe(); }, 5000);
+  document.addEventListener('drishti:autoDescribe', (e) => {
+    if (e.detail) {
+      _autoTimer = setInterval(() => {
+        if (!_isProcessing && CameraModule.isActive) triggerDescribe();
+      }, APP_CONFIG.autoDescribeInterval);
       UIModule.toast('Auto-describe on', 'success');
     } else {
-      clearInterval(_autoDescribeTimer);
+      clearInterval(_autoTimer);
     }
   });
 
@@ -125,8 +137,11 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
       _lastResult = text;
       UIModule.setResponseResult(text, { label: 'SCENE', confidence });
       const hazard = UIModule.checkAndShowHazard(text, APP_CONFIG);
-      SpeechModule.speak(text, { priority: hazard ? SpeechModule.Priority.HIGH : SpeechModule.Priority.NORMAL, interrupt: true });
-    } catch (err) { _handleError(err); }
+      SpeechModule.speak(text, {
+        priority: hazard ? SpeechModule.Priority.HIGH : SpeechModule.Priority.NORMAL,
+        interrupt: true,
+      });
+    } catch (err) { _handleErr(err); }
     finally { _isProcessing = false; UIModule.setDescribeBtnLoading(false); }
   }
 
@@ -134,14 +149,15 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
     if (_isProcessing || !_guard()) return;
     _isProcessing = true;
     UIModule.setDescribeBtnLoading(true);
-    UIModule.setResponseProcessing('Reading text in view…');
+    UIModule.setResponseProcessing('Reading visible text…');
+    UIModule.announce('Reading text');
     try {
       const img = CameraModule.captureFrame();
       const { text, confidence } = await AIModule.readText(img);
       _lastResult = text;
       UIModule.setResponseResult(text, { label: 'TEXT', confidence });
       SpeechModule.speak(text, { interrupt: true });
-    } catch (err) { _handleError(err); }
+    } catch (err) { _handleErr(err); }
     finally { _isProcessing = false; UIModule.setDescribeBtnLoading(false); }
   }
 
@@ -159,6 +175,7 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
       _isProcessing = true;
       UIModule.setDescribeBtnLoading(true);
       UIModule.setResponseProcessing(`Answering: "${question}"`);
+      UIModule.announce(`You asked: ${question}`);
       const img = CameraModule.captureFrame();
       const { text, confidence } = await AIModule.askQuestion(img, question);
       _lastResult = text;
@@ -166,7 +183,7 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
       SpeechModule.speak(text, { interrupt: true });
     } catch (err) {
       UIModule.hideVoiceOverlay();
-      if (err.message !== 'No speech detected') _handleError(err);
+      if (err.message !== 'No speech detected') _handleErr(err);
       else UIModule.setResponseReady('No speech detected. Try again.');
     } finally { _isProcessing = false; UIModule.setDescribeBtnLoading(false); }
   }
@@ -180,8 +197,8 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
     return true;
   }
 
-  function _handleError(err) {
-    let msg = 'Something went wrong. Try again.';
+  function _handleErr(err) {
+    let msg = 'Something went wrong. Please try again.';
     if (err instanceof AIError) {
       if (err.code === 'NOT_READY') msg = 'Model not ready yet.';
       else if (err.code === 'INFERENCE_FAILED') msg = 'Could not process image. Try again.';

@@ -1,118 +1,151 @@
 /**
- * Drishti — UI Module (ES Module)
- * Fixed: added showFirstTimeNotice() that app.js calls
+ * Drishti — UI Module v0.1.3
+ * Added: install banner, Android install prompt, voice test button
  */
 
 export const UIModule = (() => {
-  let _els = {};
+  let _deferredInstallPrompt = null; // Android Chrome install prompt
 
   function init() {
-    _els = {
-      splash: document.getElementById('splash'),
-      app: document.getElementById('app'),
-      loadProgress: document.getElementById('loadProgress'),
-      loadStatus: document.getElementById('loadStatus'),
-      splashSub: document.getElementById('splashSub'),
-      firstTimeNotice: document.getElementById('firstTimeNotice'),
-      modelBadge: document.getElementById('modelBadge'),
-      responseLabel: document.getElementById('responseLabel'),
-      responseText: document.getElementById('responseText'),
-      responseActions: document.getElementById('responseActions'),
-      confidenceBadge: document.getElementById('confidenceBadge'),
-      hazardBanner: document.getElementById('hazardBanner'),
-      hazardText: document.getElementById('hazardText'),
-      liveRegion: document.getElementById('liveRegion'),
-      politeRegion: document.getElementById('politeRegion'),
-      describeBtn: document.getElementById('describeBtn'),
-      settingsBtn: document.getElementById('settingsBtn'),
-      settingsPanel: document.getElementById('settingsPanel'),
-      settingsBackdrop: document.getElementById('settingsBackdrop'),
-      closeSettingsBtn: document.getElementById('closeSettingsBtn'),
-      speechRate: document.getElementById('speechRate'),
-      speechRateVal: document.getElementById('speechRateVal'),
-      speechPitch: document.getElementById('speechPitch'),
-      speechPitchVal: document.getElementById('speechPitchVal'),
-      voiceOverlay: document.getElementById('voiceOverlay'),
-      settingsModelName: document.getElementById('settingsModelName'),
-      settingsModelStatus: document.getElementById('settingsModelStatus'),
-    };
     _initSettings();
     _createToastContainer();
+    _initInstallBanner();
+  }
+
+  // ── Install banner & Android prompt ─────────────
+  function _initInstallBanner() {
+    // Android: capture the beforeinstallprompt event
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      _deferredInstallPrompt = e;
+      // Show the install button in settings
+      const btn = document.getElementById('androidInstallBtn');
+      if (btn) btn.classList.add('visible');
+    });
+
+    // After install, hide button
+    window.addEventListener('appinstalled', () => {
+      _deferredInstallPrompt = null;
+      const btn = document.getElementById('androidInstallBtn');
+      if (btn) btn.classList.remove('visible');
+      toast('App installed!', 'success', 4000);
+    });
+
+    // Android install button
+    document.getElementById('androidInstallBtn')?.addEventListener('click', async () => {
+      if (_deferredInstallPrompt) {
+        _deferredInstallPrompt.prompt();
+        const { outcome } = await _deferredInstallPrompt.userChoice;
+        if (outcome === 'accepted') toast('Installing…', 'success');
+        _deferredInstallPrompt = null;
+      } else {
+        toast('Open in Chrome and use menu → Add to Home Screen', 'info', 5000);
+      }
+    });
+
+    // Close install banner
+    document.getElementById('installBannerClose')?.addEventListener('click', () => {
+      document.getElementById('installBanner')?.classList.add('hidden');
+    });
+
+    // Show install banner if not already installed as PWA
+    const isStandalone = window.navigator.standalone ||
+      window.matchMedia('(display-mode: standalone)').matches;
+    if (!isStandalone) {
+      setTimeout(() => {
+        const banner = document.getElementById('installBanner');
+        if (banner) {
+          const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+          const inst = document.getElementById('installInstructions');
+          if (inst) inst.textContent = isIOS
+            ? 'Safari → Share ↑ → Add to Home Screen'
+            : 'Chrome menu ⋮ → Add to Home Screen';
+          banner.classList.remove('hidden');
+        }
+      }, 4000); // show after 4 seconds
+    }
   }
 
   // ── Splash ──────────────────────────────────
   function updateLoadProgress(percent, status) {
-    if (_els.loadProgress) _els.loadProgress.style.width = `${Math.min(100, percent)}%`;
-    if (_els.loadStatus) _els.loadStatus.textContent = status || '';
+    const bar = document.getElementById('loadProgress');
+    const stat = document.getElementById('loadStatus');
+    if (bar) bar.style.width = `${Math.min(100, percent)}%`;
+    if (stat) stat.textContent = status || '';
     document.querySelector('.splash-bar')?.setAttribute('aria-valuenow', percent);
   }
 
   function showFirstTimeNotice() {
-    _els.firstTimeNotice?.classList.remove('hidden');
-    if (_els.splashSub) _els.splashSub.textContent = 'First-time setup…';
+    document.getElementById('firstTimeNotice')?.classList.remove('hidden');
+    const sub = document.getElementById('splashSub');
+    if (sub) sub.textContent = 'First-time setup (Wi-Fi needed)…';
   }
 
   function hideSplash() {
-    if (!_els.splash) return;
-    _els.splash.classList.add('fade-out');
+    const splash = document.getElementById('splash');
+    const app = document.getElementById('app');
+    if (!splash) return;
+    splash.classList.add('fade-out');
     setTimeout(() => {
-      _els.splash.style.display = 'none';
-      _els.app?.classList.remove('hidden');
-      announce('Drishti is ready. Tap the describe button to describe your surroundings.', 'polite');
+      splash.style.display = 'none';
+      app?.classList.remove('hidden');
+      announce('Drishti is ready. Tap the describe button to describe what the camera sees.', 'polite');
     }, 400);
   }
 
   function showSplashError(message) {
-    if (_els.loadStatus) { _els.loadStatus.textContent = message; _els.loadStatus.style.color = '#FF3B30'; }
-    if (_els.splashSub) _els.splashSub.textContent = 'Setup failed';
+    const stat = document.getElementById('loadStatus');
+    const sub = document.getElementById('splashSub');
+    if (stat) { stat.textContent = message; stat.style.color = '#FF3B30'; }
+    if (sub) sub.textContent = 'Setup failed';
   }
 
   // ── Model badge ─────────────────────────────
   function setModelBadge(label, status = 'ready') {
-    if (_els.modelBadge) _els.modelBadge.textContent = label;
-    if (_els.settingsModelName) _els.settingsModelName.textContent = label;
-    if (_els.settingsModelStatus) _els.settingsModelStatus.textContent = status;
+    const badge = document.getElementById('modelBadge');
+    const name = document.getElementById('settingsModelName');
+    const stat = document.getElementById('settingsModelStatus');
+    if (badge) badge.textContent = label;
+    if (name) name.textContent = label;
+    if (stat) stat.textContent = status;
   }
 
   // ── Response card ───────────────────────────
   function setResponseProcessing(msg = 'Processing…') {
-    if (!_els.responseLabel) return;
-    _els.responseLabel.textContent = 'PROCESSING';
-    _els.responseText.textContent = msg;
-    _els.responseText.classList.add('processing');
-    _els.confidenceBadge?.classList.add('hidden');
-    _els.responseActions?.classList.add('hidden');
+    _setResponse('PROCESSING', msg, null, true);
+    document.getElementById('responseActions')?.classList.add('hidden');
   }
 
   function setResponseResult(text, { label = 'RESULT', confidence = 'high' } = {}) {
-    if (!_els.responseLabel) return;
-    _els.responseLabel.textContent = label;
-    _els.responseText.textContent = text;
-    _els.responseText.classList.remove('processing');
-    if (_els.confidenceBadge) {
-      _els.confidenceBadge.textContent = confidence;
-      _els.confidenceBadge.className = `confidence-badge ${confidence}`;
-      _els.confidenceBadge.classList.remove('hidden');
-    }
-    _els.responseActions?.classList.remove('hidden');
+    _setResponse(label, text, confidence, false);
+    document.getElementById('responseActions')?.classList.remove('hidden');
   }
 
   function setResponseError(message) {
-    if (!_els.responseLabel) return;
-    _els.responseLabel.textContent = 'ERROR';
-    _els.responseText.textContent = message;
-    _els.responseText.classList.remove('processing');
-    _els.confidenceBadge?.classList.add('hidden');
-    _els.responseActions?.classList.add('hidden');
+    _setResponse('ERROR', message, null, false);
+    document.getElementById('responseActions')?.classList.add('hidden');
   }
 
   function setResponseReady(msg = 'Tap the big button below to describe what the camera sees.') {
-    if (!_els.responseLabel) return;
-    _els.responseLabel.textContent = 'READY';
-    _els.responseText.textContent = msg;
-    _els.responseText.classList.remove('processing');
-    _els.confidenceBadge?.classList.add('hidden');
-    _els.responseActions?.classList.add('hidden');
+    _setResponse('READY', msg, null, false);
+    document.getElementById('responseActions')?.classList.add('hidden');
+  }
+
+  function _setResponse(label, text, confidence, processing) {
+    const lbl = document.getElementById('responseLabel');
+    const txt = document.getElementById('responseText');
+    const badge = document.getElementById('confidenceBadge');
+    if (lbl) lbl.textContent = label;
+    if (txt) { txt.textContent = text; txt.classList.toggle('processing', processing); }
+    if (badge) {
+      if (confidence) {
+        badge.textContent = confidence;
+        badge.className = `confidence-badge ${confidence}`;
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
+    }
   }
 
   // ── Hazard ──────────────────────────────────
@@ -121,17 +154,19 @@ export const UIModule = (() => {
     const found = config.hazardKeywords.some(kw => lc.includes(kw));
     if (found && getToggleState('hazardAlert')) {
       const kw = config.hazardKeywords.find(k => lc.includes(k));
-      if (_els.hazardText) _els.hazardText.textContent = `Caution: ${kw} detected`;
-      _els.hazardBanner?.classList.remove('hidden');
-      setTimeout(() => _els.hazardBanner?.classList.add('hidden'), 5000);
+      const hazardText = document.getElementById('hazardText');
+      const banner = document.getElementById('hazardBanner');
+      if (hazardText) hazardText.textContent = `Caution: ${kw} detected`;
+      banner?.classList.remove('hidden');
+      setTimeout(() => banner?.classList.add('hidden'), 5000);
       return true;
     }
     return false;
   }
 
-  // ── Button state ────────────────────────────
+  // ── Button states ───────────────────────────
   function setDescribeBtnLoading(loading) {
-    const btn = _els.describeBtn;
+    const btn = document.getElementById('describeBtn');
     if (!btn) return;
     if (loading) {
       btn.classList.add('loading', 'processing');
@@ -139,27 +174,28 @@ export const UIModule = (() => {
       btn.disabled = true;
     } else {
       btn.classList.remove('loading', 'processing');
-      btn.setAttribute('aria-label', 'Tap to describe scene. Double-tap to read text. Hold to ask question.');
+      btn.setAttribute('aria-label', 'Tap to describe scene. Double-tap to read text. Hold to ask a question.');
       btn.disabled = false;
     }
   }
 
   function setCameraToggleState(active) {
     const btn = document.getElementById('cameraToggleBtn');
-    if (btn) { btn.setAttribute('aria-pressed', String(active)); btn.classList.toggle('active', active); }
     const status = document.getElementById('cameraStatus');
+    if (btn) { btn.setAttribute('aria-pressed', String(active)); btn.classList.toggle('active', active); }
     if (status) status.classList.toggle('hidden-overlay', active);
   }
 
-  // ── ARIA ────────────────────────────────────
+  // ── ARIA announcements ───────────────────────
   function announce(text, urgency = 'assertive') {
-    const el = urgency === 'polite' ? _els.politeRegion : _els.liveRegion;
+    const id = urgency === 'polite' ? 'politeRegion' : 'liveRegion';
+    const el = document.getElementById(id);
     if (!el) return;
     el.textContent = '';
     requestAnimationFrame(() => { el.textContent = text; });
   }
 
-  // ── Toast ───────────────────────────────────
+  // ── Toast ────────────────────────────────────
   let _toastContainer = null;
   function _createToastContainer() {
     _toastContainer = document.createElement('div');
@@ -181,21 +217,23 @@ export const UIModule = (() => {
     }, duration);
   }
 
-  // ── Settings ────────────────────────────────
+  // ── Settings ─────────────────────────────────
   function _initSettings() {
-    _els.settingsBtn?.addEventListener('click', openSettings);
-    _els.closeSettingsBtn?.addEventListener('click', closeSettings);
-    _els.settingsBackdrop?.addEventListener('click', closeSettings);
+    document.getElementById('settingsBtn')?.addEventListener('click', openSettings);
+    document.getElementById('closeSettingsBtn')?.addEventListener('click', closeSettings);
+    document.getElementById('settingsBackdrop')?.addEventListener('click', closeSettings);
 
-    _els.speechRate?.addEventListener('input', () => {
-      const val = parseFloat(_els.speechRate.value).toFixed(1);
-      if (_els.speechRateVal) _els.speechRateVal.textContent = `${val}×`;
-      document.dispatchEvent(new CustomEvent('seeforme:speechRate', { detail: val }));
+    document.getElementById('speechRate')?.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value).toFixed(2);
+      const display = document.getElementById('speechRateVal');
+      if (display) display.textContent = `${val}×`;
+      document.dispatchEvent(new CustomEvent('drishti:speechRate', { detail: val }));
     });
-    _els.speechPitch?.addEventListener('input', () => {
-      const val = parseFloat(_els.speechPitch.value).toFixed(1);
-      if (_els.speechPitchVal) _els.speechPitchVal.textContent = val;
-      document.dispatchEvent(new CustomEvent('seeforme:speechPitch', { detail: val }));
+    document.getElementById('speechPitch')?.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value).toFixed(2);
+      const display = document.getElementById('speechPitchVal');
+      if (display) display.textContent = val;
+      document.dispatchEvent(new CustomEvent('drishti:speechPitch', { detail: val }));
     });
 
     ['briefMode', 'hazardAlert', 'autoDescribe'].forEach(id => {
@@ -205,41 +243,47 @@ export const UIModule = (() => {
         btn.setAttribute('aria-checked', String(newVal));
         btn.classList.toggle('active', newVal);
         if (id === 'autoDescribe') {
-          document.dispatchEvent(new CustomEvent('seeforme:autoDescribeToggle', { detail: { enabled: newVal } }));
+          document.dispatchEvent(new CustomEvent('drishti:autoDescribe', { detail: newVal }));
         }
       });
+    });
+
+    document.getElementById('testVoiceBtn')?.addEventListener('click', () => {
+      document.dispatchEvent(new CustomEvent('drishti:testVoice'));
     });
 
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSettings(); });
   }
 
   function openSettings() {
-    _els.settingsPanel?.classList.remove('hidden');
-    _els.settingsBackdrop?.classList.remove('hidden');
-    _els.settingsBtn?.setAttribute('aria-expanded', 'true');
-    setTimeout(() => _els.closeSettingsBtn?.focus(), 50);
+    document.getElementById('settingsPanel')?.classList.remove('hidden');
+    document.getElementById('settingsBackdrop')?.classList.remove('hidden');
+    document.getElementById('settingsBtn')?.setAttribute('aria-expanded', 'true');
+    setTimeout(() => document.getElementById('closeSettingsBtn')?.focus(), 50);
   }
 
   function closeSettings() {
-    _els.settingsPanel?.classList.add('hidden');
-    _els.settingsBackdrop?.classList.add('hidden');
-    _els.settingsBtn?.setAttribute('aria-expanded', 'false');
-    _els.settingsBtn?.focus();
+    document.getElementById('settingsPanel')?.classList.add('hidden');
+    document.getElementById('settingsBackdrop')?.classList.add('hidden');
+    document.getElementById('settingsBtn')?.setAttribute('aria-expanded', 'false');
+    document.getElementById('settingsBtn')?.focus();
   }
 
   function getToggleState(id) {
     return document.getElementById(id)?.getAttribute('aria-checked') === 'true';
   }
 
-  // ── Voice overlay ───────────────────────────
+  // ── Voice overlay ────────────────────────────
   function showVoiceOverlay() {
-    _els.voiceOverlay?.classList.remove('hidden');
+    document.getElementById('voiceOverlay')?.classList.remove('hidden');
     const t = document.getElementById('voiceTranscript');
     if (t) t.textContent = '';
     announce('Listening for your question');
   }
 
-  function hideVoiceOverlay() { _els.voiceOverlay?.classList.add('hidden'); }
+  function hideVoiceOverlay() {
+    document.getElementById('voiceOverlay')?.classList.add('hidden');
+  }
 
   return {
     init, updateLoadProgress, showFirstTimeNotice, hideSplash, showSplashError,
