@@ -2,29 +2,55 @@
 <html lang="en" dir="ltr">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#0A0E1A" />
-  <meta name="description" content="Drishti – On-device visual assistant for blind and low-vision users. No internet required after setup." />
+  <meta name="description" content="Drishti – On-device visual assistant for blind and low-vision users." />
 
-  <link rel="manifest" href="manifest.json" />
+  <!-- ═══ iOS PWA — ALL required tags ═══ -->
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Drishti" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <!-- Apple touch icons — multiple sizes iOS actually uses -->
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152.png" />
+  <link rel="apple-touch-icon" sizes="167x167" href="icons/icon-167.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png" />
+
+  <!-- ═══ Android PWA ═══ -->
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- ═══ Favicon ═══ -->
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/icon-192.png" />
+
+  <!-- Security -->
   <meta http-equiv="X-Content-Type-Options" content="nosniff" />
 
   <title>Drishti — Visual Assistant</title>
 
+  <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
 
+  <!-- Install guide banner — shown to users who haven't installed yet -->
+  <div id="installBanner" class="install-banner hidden" role="complementary" aria-label="Install app">
+    <div class="install-banner-inner">
+      <span class="install-banner-icon">📲</span>
+      <div class="install-banner-text">
+        <strong id="installTitle">Install Drishti</strong>
+        <span id="installInstructions">Tap Share → Add to Home Screen</span>
+      </div>
+      <button class="install-banner-close" id="installBannerClose" aria-label="Dismiss install prompt">✕</button>
+    </div>
+  </div>
+
   <a href="#main-action" class="skip-link">Skip to main action</a>
 
-  <!-- SPLASH -->
+  <!-- ══════════ SPLASH ══════════ -->
   <div id="splash" role="status" aria-live="polite" aria-label="Loading Drishti">
     <div class="splash-inner">
       <div class="splash-icon" aria-hidden="true">
@@ -36,29 +62,28 @@
         </svg>
       </div>
       <h1 class="splash-title">Drishti</h1>
-      <p class="splash-sub" id="splashSub">Loading AI model…</p>
+      <p class="splash-sub" id="splashSub">Loading…</p>
       <div class="splash-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
         <div class="splash-bar-fill" id="loadProgress"></div>
       </div>
       <p class="splash-status" id="loadStatus">Initialising…</p>
-      <!-- First-time notice (hidden until needed) -->
       <div class="first-time-notice hidden" id="firstTimeNotice">
         <p>📶 First launch: downloading AI model (~80 MB).</p>
-        <p>Connect to Wi-Fi. This happens <strong>once only</strong> — after this, works offline forever.</p>
+        <p>Use <strong>Wi-Fi</strong>. This only happens <strong>once</strong> — works offline forever after.</p>
       </div>
     </div>
   </div>
 
-  <!-- MAIN APP -->
+  <!-- ══════════ MAIN APP ══════════ -->
   <main id="app" class="app hidden" role="main">
 
     <header class="app-header" role="banner">
       <div class="header-left">
-        <span class="app-name" aria-label="Drishti app">Drishti</span>
+        <span class="app-name">Drishti</span>
         <span class="model-badge" id="modelBadge" aria-live="polite">Loading…</span>
       </div>
       <div class="header-right">
-        <button class="icon-btn" id="settingsBtn" aria-label="Open settings" aria-expanded="false" aria-controls="settingsPanel">
+        <button class="icon-btn" id="settingsBtn" aria-label="Open settings" aria-expanded="false">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <circle cx="12" cy="12" r="3"/>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
@@ -90,36 +115,38 @@
 
     <!-- RESPONSE -->
     <section class="response-section" aria-label="AI description output">
-      <div class="response-card" id="responseCard">
+      <div class="response-card">
         <div class="response-header">
-          <span class="response-label" id="responseLabel">Ready</span>
+          <span class="response-label" id="responseLabel">READY</span>
           <span class="confidence-badge hidden" id="confidenceBadge"></span>
         </div>
-        <p class="response-text" id="responseText">Tap the big button below to describe what the camera sees.</p>
+        <p class="response-text" id="responseText" aria-live="polite">
+          Tap the big button below to describe what the camera sees.
+        </p>
         <div class="response-actions hidden" id="responseActions">
           <button class="text-btn" id="replayBtn" aria-label="Replay last description">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/></svg>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/></svg>
             Replay
           </button>
           <button class="text-btn" id="copyBtn" aria-label="Copy to clipboard">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             Copy
           </button>
         </div>
       </div>
     </section>
 
-    <!-- ACTIONS -->
-    <section class="action-section" aria-label="Main controls" id="main-action">
+    <!-- MAIN CONTROLS -->
+    <section class="action-section" id="main-action" aria-label="Main controls">
       <div class="primary-action-wrap">
         <button class="primary-btn" id="describeBtn"
-          aria-label="Tap to describe scene. Double-tap to read text. Hold to ask question."
+          aria-label="Tap to describe scene. Double-tap to read text. Hold to ask a question."
           aria-describedby="btnHint">
           <div class="sonar-ring ring-1" aria-hidden="true"></div>
           <div class="sonar-ring ring-2" aria-hidden="true"></div>
           <div class="sonar-ring ring-3" aria-hidden="true"></div>
           <div class="btn-icon" aria-hidden="true">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
               <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
               <circle cx="12" cy="12" r="3"/>
             </svg>
@@ -130,9 +157,12 @@
       </div>
 
       <div class="secondary-controls" role="group" aria-label="Secondary actions">
-        <button class="secondary-btn" id="readTextBtn" aria-label="Read text visible in camera">
+        <button class="secondary-btn" id="readTextBtn" aria-label="Read visible text">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
           </svg>
           <span>Read Text</span>
         </button>
@@ -144,7 +174,10 @@
         </button>
         <button class="secondary-btn" id="voiceInputBtn" aria-label="Ask a question by voice">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="23"/>
+            <line x1="8" y1="23" x2="16" y2="23"/>
           </svg>
           <span>Ask</span>
         </button>
@@ -152,18 +185,18 @@
     </section>
 
     <!-- VOICE OVERLAY -->
-    <div class="voice-overlay hidden" id="voiceOverlay" role="dialog" aria-modal="true" aria-label="Voice question input">
+    <div class="voice-overlay hidden" id="voiceOverlay" role="dialog" aria-modal="true" aria-label="Voice input">
       <div class="voice-modal">
         <div class="voice-wave" aria-hidden="true">
           <span></span><span></span><span></span><span></span><span></span>
         </div>
-        <p class="voice-prompt" id="voicePromptText">Listening…</p>
+        <p class="voice-prompt">Listening…</p>
         <p class="voice-transcript" id="voiceTranscript" aria-live="polite"></p>
-        <button class="cancel-btn" id="cancelVoiceBtn" aria-label="Cancel voice input">Cancel</button>
+        <button class="cancel-btn" id="cancelVoiceBtn" aria-label="Cancel">Cancel</button>
       </div>
     </div>
 
-    <!-- SETTINGS PANEL -->
+    <!-- SETTINGS -->
     <aside class="settings-panel hidden" id="settingsPanel" role="dialog" aria-modal="true" aria-label="Settings">
       <div class="settings-inner">
         <div class="settings-header">
@@ -180,43 +213,71 @@
             <label class="setting-row" for="speechRate">
               <span class="setting-label">Reading speed</span>
               <div class="setting-control">
-                <input type="range" id="speechRate" min="0.5" max="2.5" step="0.1" value="1.1" class="range-input"/>
-                <span class="range-value" id="speechRateVal">1.1×</span>
+                <input type="range" id="speechRate" min="0.5" max="2.5" step="0.1" value="0.95" class="range-input"/>
+                <span class="range-value" id="speechRateVal">0.95×</span>
               </div>
             </label>
             <label class="setting-row" for="speechPitch">
               <span class="setting-label">Pitch</span>
               <div class="setting-control">
-                <input type="range" id="speechPitch" min="0.5" max="2" step="0.1" value="1" class="range-input"/>
+                <input type="range" id="speechPitch" min="0.5" max="2" step="0.05" value="1.0" class="range-input"/>
                 <span class="range-value" id="speechPitchVal">1.0</span>
               </div>
             </label>
             <label class="setting-row" for="voiceSelect">
-              <span class="setting-label">Voice</span>
-              <select id="voiceSelect" class="select-input"></select>
+              <span class="setting-label">Voice <small>Choose a natural voice</small></span>
+              <select id="voiceSelect" class="select-input" aria-label="Choose speech voice"></select>
             </label>
+            <div class="setting-row">
+              <button class="text-btn" id="testVoiceBtn" aria-label="Test the selected voice">
+                Test voice
+              </button>
+            </div>
           </div>
+
           <div class="setting-group">
             <h3 class="setting-group-title">Behaviour</h3>
             <div class="setting-row toggle-row">
-              <span class="setting-label">Brief mode <small>Short, terse answers</small></span>
-              <button class="toggle-btn" id="briefMode" role="switch" aria-checked="false">
-                <span class="toggle-knob"></span>
-              </button>
+              <span class="setting-label">Brief mode <small>Shorter descriptions</small></span>
+              <button class="toggle-btn" id="briefMode" role="switch" aria-checked="false"><span class="toggle-knob"></span></button>
             </div>
             <div class="setting-row toggle-row">
               <span class="setting-label">Hazard alerts <small>Announce dangers first</small></span>
-              <button class="toggle-btn active" id="hazardAlert" role="switch" aria-checked="true">
-                <span class="toggle-knob"></span>
-              </button>
+              <button class="toggle-btn active" id="hazardAlert" role="switch" aria-checked="true"><span class="toggle-knob"></span></button>
             </div>
             <div class="setting-row toggle-row">
               <span class="setting-label">Auto-describe <small>Every 5 seconds</small></span>
-              <button class="toggle-btn" id="autoDescribe" role="switch" aria-checked="false">
-                <span class="toggle-knob"></span>
+              <button class="toggle-btn" id="autoDescribe" role="switch" aria-checked="false"><span class="toggle-knob"></span></button>
+            </div>
+          </div>
+
+          <div class="setting-group">
+            <h3 class="setting-group-title">Install as App</h3>
+            <div class="install-instructions">
+              <div class="install-step" id="installStepIos">
+                <p class="install-step-title">📱 iPhone / iPad</p>
+                <ol class="install-step-list">
+                  <li>Open this page in <strong>Safari</strong></li>
+                  <li>Tap the <strong>Share</strong> button (box with arrow ↑)</li>
+                  <li>Scroll and tap <strong>Add to Home Screen</strong></li>
+                  <li>Tap <strong>Add</strong> — done!</li>
+                </ol>
+              </div>
+              <div class="install-step" id="installStepAndroid">
+                <p class="install-step-title">🤖 Android</p>
+                <ol class="install-step-list">
+                  <li>Open in <strong>Chrome</strong></li>
+                  <li>Tap the <strong>⋮ menu</strong> (top right)</li>
+                  <li>Tap <strong>Add to Home screen</strong></li>
+                  <li>Tap <strong>Install</strong> — done!</li>
+                </ol>
+              </div>
+              <button class="install-btn" id="androidInstallBtn" aria-label="Install app on Android">
+                Install App
               </button>
             </div>
           </div>
+
           <div class="setting-group">
             <h3 class="setting-group-title">AI Model</h3>
             <div class="model-info-card">
@@ -229,15 +290,16 @@
                 <span class="model-info-val" id="settingsModelStatus">–</span>
               </div>
               <div class="model-info-row">
-                <span class="model-info-label">Runs</span>
-                <span class="model-info-val">On-device · No internet needed</span>
+                <span class="model-info-label">Storage</span>
+                <span class="model-info-val">On-device · No internet after setup</span>
               </div>
             </div>
           </div>
+
           <div class="setting-group">
             <h3 class="setting-group-title">About</h3>
-            <p class="about-text">Drishti runs entirely on your device. No photos are sent to any server. All AI processing happens locally in your browser.</p>
-            <p class="version-text">Version 0.1.1 · Powered by Transformers.js</p>
+            <p class="about-text">Drishti runs entirely on your device. No photos are ever sent to any server. All AI processing happens locally.</p>
+            <p class="version-text">Version 0.1.3 · Transformers.js</p>
           </div>
         </div>
       </div>
@@ -246,14 +308,10 @@
 
   </main>
 
-  <!--
-    CRITICAL FIX: Transformers.js MUST be loaded as an ES Module.
-    We use type="module" on ALL our scripts so they can use top-level
-    imports and the `import { pipeline }` syntax.
-    Load order: config → speech → camera → ai → ui → app
-  -->
+  <!-- ES Module entry — must be type="module" for Transformers.js imports -->
   <script type="module" src="js/main.js"></script>
 
+  <!-- Service worker (non-module, registered separately) -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {

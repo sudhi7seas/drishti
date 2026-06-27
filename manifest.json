@@ -1,8 +1,9 @@
 {
   "name": "Drishti – Visual Assistant",
   "short_name": "Drishti",
-  "description": "On-device visual assistant for blind and low-vision users. Describes scenes, reads text. Works offline.",
-  "start_url": "/",
+  "description": "On-device visual assistant for blind and low-vision users. Works offline.",
+  "start_url": "/drishti/",
+  "scope": "/drishti/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0A0E1A",
@@ -10,7 +11,12 @@
   "lang": "en",
   "categories": ["accessibility", "utilities"],
   "icons": [
+    { "src": "icons/icon-152.png", "sizes": "152x152", "type": "image/png" },
+    { "src": "icons/icon-167.png", "sizes": "167x167", "type": "image/png" },
+    { "src": "icons/icon-180.png", "sizes": "180x180", "type": "image/png" },
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
-  ]
+  ],
+  "screenshots": [],
+  "prefer_related_applications": false
 }
