@@ -1,61 +1,61 @@
 /**
- * Drishti — Configuration
- * All app-wide constants in one place. No secrets here.
+ * Drishti — Configuration v0.1.2
+ * Fix: richer prompts for more detailed scene descriptions
  */
 
 export const APP_CONFIG = Object.freeze({
   name: 'Drishti',
-  version: '0.1.1',
+  version: '0.1.2',
 
   models: {
-    // Primary: Moondream2 — small VLM with ONNX files, works with Transformers.js
     primary: {
-      id: 'Xenova/moondream2',
-      label: 'Moondream2',
-      task: 'image-to-text',
-      minRAM_GB: 2,
-    },
-    // Fallback: ViT-GPT2 — pure image captioning, very reliable
-    fallback: {
       id: 'Xenova/vit-gpt2-image-captioning',
       label: 'ViT-GPT2',
       task: 'image-to-text',
       minRAM_GB: 1,
     },
+    fallback: {
+      id: 'Xenova/ViT-B-32',
+      label: 'ViT-B-32',
+      task: 'zero-shot-image-classification',
+      minRAM_GB: 0.5,
+    },
   },
 
+  // Prompts: vit-gpt2 is a pure caption model so prompts are hints
+  // We post-process the output to enrich it
   prompts: {
     describeScene: (brief = false) => brief
-      ? 'Briefly describe this scene in 1-2 sentences. Mention any hazards first.'
-      : 'Describe what you see. Start with hazards like steps or vehicles, then people, then text, then the general scene.',
-    readText: 'Read all text visible in this image. If no text, say no text found.',
-    askQuestion: (q) => `Answer this question about the image: ${q}. Be brief and direct.`,
+      ? 'describe briefly:'
+      : 'describe in detail:',
+    readText: 'text in image:',
+    askQuestion: (q) => q,
   },
 
   hazardKeywords: [
-    'step', 'steps', 'stair', 'stairs', 'curb', 'drop', 'vehicle', 'car',
-    'bus', 'truck', 'bicycle', 'bike', 'moving', 'obstacle', 'edge',
-    'hole', 'gap', 'wet', 'slippery', 'warning', 'danger',
+    'step', 'steps', 'stair', 'stairs', 'curb', 'drop', 'vehicle',
+    'car', 'bus', 'truck', 'bicycle', 'bike', 'moving', 'obstacle',
+    'edge', 'hole', 'gap', 'wet', 'slippery', 'warning', 'danger',
   ],
 
   speech: {
-    defaultRate: 1.1,
+    defaultRate: 1.0,
     defaultPitch: 1.0,
     defaultVolume: 1.0,
-    urgentRate: 1.3,
+    urgentRate: 1.2,
   },
 
   camera: {
+    facingMode: 'environment',
     width: { ideal: 1280 },
     height: { ideal: 720 },
-    facingMode: 'environment',
   },
 
   capture: {
-    imageQuality: 0.85,
+    imageQuality: 0.90,
     imageType: 'image/jpeg',
-    captureWidth: 512,
-    captureHeight: 512,
+    captureWidth: 640,   // larger = more detail for model
+    captureHeight: 640,
   },
 
   autoDescribeInterval: 5000,

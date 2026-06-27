@@ -1,11 +1,13 @@
 /**
  * Drishti — Speech Module (ES Module)
+ * FIX: iOS-friendly voice selection — prefers high-quality Siri voices
+ * FIX: Falls back gracefully, retries voice list on iOS (loads async)
  */
 
 export const SpeechModule = (() => {
   let _voices = [];
   let _selectedVoice = null;
-  let _rate = 1.1;
+  let _rate = 1.0;
   let _pitch = 1.0;
   let _volume = 1.0;
   let _isSpeaking = false;
@@ -17,31 +19,55 @@ export const SpeechModule = (() => {
 
   function init() {
     if (!('speechSynthesis' in window)) return;
-    window.speechSynthesis.onvoiceschanged = _loadVoices;
+    // iOS loads voices asynchronously — must listen for event AND call immediately
+    if (window.speechSynthesis.onvoiceschanged !== undefined) {
+      window.speechSynthesis.onvoiceschanged = _loadVoices;
+    }
     _loadVoices();
+    // iOS Safari extra: retry after short delay
+    setTimeout(_loadVoices, 500);
+    setTimeout(_loadVoices, 1500);
   }
 
   function _loadVoices() {
-    _voices = window.speechSynthesis.getVoices();
-    _selectedVoice = _voices.find(v => v.lang.startsWith('en') && v.localService)
-      || _voices.find(v => v.lang.startsWith('en'))
-      || _voices[0];
+    const all = window.speechSynthesis.getVoices();
+    if (!all.length) return; // not ready yet
+    _voices = all;
+
+    // Preference order for a natural-sounding voice:
+    // 1. iOS Siri / Premium voices (Samantha, Daniel, Karen, Moira)
+    // 2. Any local English voice
+    // 3. Any English voice (network/cloud)
+    // 4. Whatever is available
+    const premiumNames = ['Samantha', 'Daniel', 'Karen', 'Moira', 'Tessa', 'Rishi', 'Fiona'];
+    const enVoices = all.filter(v => v.lang.startsWith('en'));
+
+    _selectedVoice =
+      enVoices.find(v => premiumNames.some(n => v.name.includes(n))) ||
+      enVoices.find(v => v.localService && v.name.includes('Enhanced')) ||
+      enVoices.find(v => v.localService) ||
+      enVoices[0] ||
+      all[0];
+
     _populateVoiceSelect();
   }
 
   function _populateVoiceSelect() {
     const sel = document.getElementById('voiceSelect');
-    if (!sel || !_voices.length) return;
+    if (!sel) return;
+    // Only repopulate if voices changed
+    const enVoices = _voices.filter(v => v.lang.startsWith('en'));
+    if (!enVoices.length) return;
     sel.innerHTML = '';
-    _voices.filter(v => v.lang.startsWith('en')).forEach(v => {
+    enVoices.forEach(v => {
       const opt = document.createElement('option');
       opt.value = v.voiceURI;
-      opt.textContent = `${v.name} (${v.lang})`;
+      opt.textContent = `${v.name} (${v.lang})${v.localService ? '' : ' ☁'}`;
       if (v === _selectedVoice) opt.selected = true;
       sel.appendChild(opt);
     });
     sel.onchange = () => {
-      _selectedVoice = _voices.find(v => v.voiceURI === sel.value) || null;
+      _selectedVoice = _voices.find(v => v.voiceURI === sel.value) || _selectedVoice;
     };
   }
 
@@ -61,21 +87,23 @@ export const SpeechModule = (() => {
     const entry = _queue.shift();
     const utt = new SpeechSynthesisUtterance(entry.text);
     if (_selectedVoice) utt.voice = _selectedVoice;
-    utt.rate = entry.priority === Priority.HIGH ? 1.3 : _rate;
-    utt.pitch = _pitch;
+    utt.rate   = entry.priority === Priority.HIGH ? 1.2 : _rate;
+    utt.pitch  = _pitch;
     utt.volume = _volume;
-    utt.onend = () => { entry.onEnd?.(); _processQueue(); };
+    utt.onend  = () => { entry.onEnd?.(); _processQueue(); };
     utt.onerror = (e) => {
       if (e.error !== 'interrupted' && e.error !== 'canceled') console.warn('[Speech]', e.error);
       entry.onEnd?.(); _processQueue();
     };
+
+    // iOS Safari workaround: speech can silently stall — resume if needed
     window.speechSynthesis.speak(utt);
+    if (window.speechSynthesis.paused) window.speechSynthesis.resume();
   }
 
   function stop() {
     window.speechSynthesis.cancel();
-    _queue = [];
-    _isSpeaking = false;
+    _queue = []; _isSpeaking = false;
   }
 
   function isRecognitionSupported() {
@@ -91,8 +119,7 @@ export const SpeechModule = (() => {
       _recognition.interimResults = true;
       _recognition.maxAlternatives = 1;
       let finalTranscript = '';
-      let timeout = setTimeout(() => { _recognition?.stop(); }, 10000);
-
+      let timeout = setTimeout(() => _recognition?.stop(), 10000);
       _recognition.onresult = (e) => {
         clearTimeout(timeout);
         const el = document.getElementById('voiceTranscript');
@@ -126,7 +153,9 @@ export const SpeechModule = (() => {
   function setPitch(p) { _pitch = parseFloat(p); }
   function setVolume(v) { _volume = parseFloat(v); }
 
-  return { Priority, init, speak, stop, listenForQuestion, stopListening,
+  return {
+    Priority, init, speak, stop, listenForQuestion, stopListening,
     isRecognitionSupported, setRate, setPitch, setVolume,
-    get isSpeaking() { return _isSpeaking; } };
+    get isSpeaking() { return _isSpeaking; },
+  };
 })();
