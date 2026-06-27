@@ -880,3 +880,22 @@ body {
   from { opacity: 0; transform: translateY(12px) scale(0.95); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
+
+/* ── First-time download notice ── */
+.first-time-notice {
+  margin-top: 12px;
+  padding: 14px 16px;
+  background: rgba(255, 149, 0, 0.12);
+  border: 1px solid var(--amber-400);
+  border-radius: var(--radius-md);
+  text-align: center;
+  max-width: 300px;
+}
+.first-time-notice p {
+  font-size: 0.82rem;
+  color: var(--amber-300);
+  line-height: 1.5;
+  margin-bottom: 4px;
+}
+.first-time-notice p:last-child { margin-bottom: 0; }
+.first-time-notice strong { color: var(--amber-400); }
