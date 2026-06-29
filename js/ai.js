@@ -1,24 +1,11 @@
 /**
- * Drishti — AI Module v0.1.6
+ * Drishti — AI Module v0.1.7
  *
- * ARCHITECTURE CHANGE: Worker-based inference
- *
- * Instead of running the ONNX model on the main thread (which caused
- * iOS to kill the app after 30s of heavy CPU), inference now runs in
- * a dedicated Web Worker (ai.worker.js).
- *
- * Main thread responsibilities:
- *   - Image capture and preprocessing (canvas → pixel bytes)
- *   - Sending pixel data to worker via postMessage
- *   - Receiving text results back
- *   - Restarting worker if iOS kills it
- *
- * Worker responsibilities:
- *   - Loading and holding the ONNX pipeline
- *   - Running inference (CPU-heavy work isolated here)
- *
- * If Web Workers are not supported (very rare), falls back to
- * main-thread inference automatically.
+ * FIXES:
+ * 1. Worker now loaded as type:'module' so ES module imports work
+ * 2. If worker fails for ANY reason → automatic fallback to main thread
+ * 3. Progress bar now always moves (was stuck because worker silently failed)
+ * 4. Cleaner error messages
  */
 
 export class AIError extends Error {
@@ -30,21 +17,21 @@ export class AIError extends Error {
 }
 
 export const AIModule = (() => {
-  // ── State ──────────────────────────────────────────────────────────
-  let _worker       = null;
-  let _pipelineFn   = null; // fallback if workers unsupported
-  let _RawImage     = null;
-  let _pipeline     = null; // fallback pipeline on main thread
-  let _useWorker    = false;
-  let _modelId      = null;
-  let _modelLabel   = null;
-  let _isReady      = false;
-  let _isLoading    = false;
+  let _worker         = null;
+  let _pipelineFn     = null;
+  let _RawImage       = null;
+  let _pipeline       = null;   // main-thread fallback
+  let _useWorker      = false;
+  let _modelId        = null;
+  let _modelLabel     = null;
+  let _isReady        = false;
+  let _isLoading      = false;
   let _loadedFromCache = false;
-  let _inferCallbacks = new Map(); // id → { resolve, reject }
-  let _inferIdCounter = 0;
-  let _config       = null;
+  let _inferCallbacks  = new Map();
+  let _inferIdCounter  = 0;
+  let _config          = null;
 
+  // Injected from main.js
   function setPipelineFn(fn, RawImage) {
     _pipelineFn = fn;
     _RawImage   = RawImage;
@@ -61,63 +48,71 @@ export const AIModule = (() => {
     } catch { return false; }
   }
 
-  // ── Create / restart worker ────────────────────────────────────────
+  // ── Worker setup ───────────────────────────────────────────────────
+  function _workerSupported() {
+    try {
+      // Check basic Worker support
+      if (typeof Worker === 'undefined') return false;
+      // iOS Safari 15+ supports module workers; older versions don't
+      // We detect by trying to create one — if it throws, we fall back
+      return true;
+    } catch { return false; }
+  }
+
   function _createWorker() {
-    if (_worker) { try { _worker.terminate(); } catch {} }
+    if (_worker) { try { _worker.terminate(); } catch {} _worker = null; }
 
-    _worker = new Worker('js/ai.worker.js');
+    try {
+      // type:'module' allows ES module imports inside the worker
+      _worker = new Worker('js/ai.worker.js', { type: 'module' });
 
-    _worker.onmessage = (e) => {
-      const msg = e.data;
+      _worker.onmessage = (e) => {
+        const msg = e.data;
+        if (msg.type === 'PROGRESS') {
+          AIModule._onProgress?.(msg);
+        } else if (msg.type === 'LOAD_OK') {
+          _isReady   = true;
+          _isLoading = false;
+          AIModule._onLoadOk?.(msg.modelLabel);
+        } else if (msg.type === 'LOAD_ERR') {
+          _isLoading = false;
+          AIModule._onLoadErr?.(msg.message);
+        } else if (msg.type === 'INFER_OK') {
+          const cb = _inferCallbacks.get(msg.id);
+          if (cb) { _inferCallbacks.delete(msg.id); cb.resolve(msg.text); }
+        } else if (msg.type === 'INFER_ERR') {
+          const cb = _inferCallbacks.get(msg.id);
+          if (cb) { _inferCallbacks.delete(msg.id); cb.reject(new Error(msg.message)); }
+        }
+      };
 
-      if (msg.type === 'PROGRESS') {
-        // Forward progress to any registered listener
-        AIModule._onProgress?.(msg);
-        return;
-      }
+      _worker.onerror = (err) => {
+        console.warn('[Worker] Error — falling back to main thread:', err.message);
+        _rejectAllPending('Worker error — retrying');
+        // Fall back to main thread permanently
+        _useWorker = false;
+        _worker    = null;
+        if (_config && !_isReady) {
+          _loadMainThread(_config, AIModule._onProgress).then(result => {
+            _isReady   = true;
+            _isLoading = false;
+            AIModule._onLoadOk?.(result.modelLabel);
+          }).catch(err => AIModule._onLoadErr?.(err.message));
+        }
+      };
 
-      if (msg.type === 'LOAD_OK') {
-        _isReady = true;
-        _isLoading = false;
-        AIModule._onLoadOk?.(msg.modelLabel);
-        return;
-      }
+      return true;
+    } catch (err) {
+      console.warn('[Worker] Could not create worker:', err.message);
+      _worker    = null;
+      _useWorker = false;
+      return false;
+    }
+  }
 
-      if (msg.type === 'LOAD_ERR') {
-        _isLoading = false;
-        AIModule._onLoadErr?.(msg.message);
-        return;
-      }
-
-      if (msg.type === 'INFER_OK') {
-        const cb = _inferCallbacks.get(msg.id);
-        if (cb) { _inferCallbacks.delete(msg.id); cb.resolve(msg.text); }
-        return;
-      }
-
-      if (msg.type === 'INFER_ERR') {
-        const cb = _inferCallbacks.get(msg.id);
-        if (cb) { _inferCallbacks.delete(msg.id); cb.reject(new Error(msg.message)); }
-        return;
-      }
-    };
-
-    _worker.onerror = (err) => {
-      console.error('[Worker] Crashed:', err.message);
-      // Reject any pending inferences
-      for (const [id, cb] of _inferCallbacks) {
-        cb.reject(new Error('AI worker crashed. Restarting…'));
-      }
-      _inferCallbacks.clear();
-
-      // Restart the worker and reload the model
-      _isReady = false;
-      if (_config) {
-        setTimeout(() => _loadViaWorker(_config, null), 1000);
-      }
-    };
-
-    return _worker;
+  function _rejectAllPending(reason) {
+    for (const [, cb] of _inferCallbacks) cb.reject(new Error(reason));
+    _inferCallbacks.clear();
   }
 
   // ── Load via worker ────────────────────────────────────────────────
@@ -125,9 +120,33 @@ export const AIModule = (() => {
     return new Promise((resolve, reject) => {
       const modelDef = config.models.primary;
 
-      AIModule._onProgress = (p) => onProgress?.({ ...p, fromCache: _loadedFromCache });
-      AIModule._onLoadOk   = (label) => resolve({ modelLabel: label, modelId: modelDef.id, fromCache: _loadedFromCache });
-      AIModule._onLoadErr  = (msg)   => reject(new AIError('MODEL_LOAD_FAILED', msg));
+      // Timeout: if worker doesn't respond in 30s, fall back
+      const timeout = setTimeout(() => {
+        console.warn('[Worker] Load timeout — falling back to main thread');
+        _useWorker = false;
+        _worker?.terminate();
+        _worker = null;
+        _loadMainThread(config, onProgress).then(resolve).catch(reject);
+      }, 30000);
+
+      AIModule._onProgress = (p) => {
+        clearTimeout(timeout); // reset timeout on any progress
+        onProgress?.({ ...p, fromCache: _loadedFromCache });
+      };
+
+      AIModule._onLoadOk = (label) => {
+        clearTimeout(timeout);
+        resolve({ modelLabel: label, modelId: modelDef.id, fromCache: _loadedFromCache });
+      };
+
+      AIModule._onLoadErr = (msg) => {
+        clearTimeout(timeout);
+        console.warn('[Worker] Load failed, falling back to main thread:', msg);
+        _useWorker = false;
+        _worker?.terminate();
+        _worker = null;
+        _loadMainThread(config, onProgress).then(resolve).catch(reject);
+      };
 
       _worker.postMessage({
         type:       'LOAD',
@@ -138,9 +157,10 @@ export const AIModule = (() => {
     });
   }
 
-  // ── Load via main thread (fallback) ───────────────────────────────
+  // ── Load on main thread ────────────────────────────────────────────
   async function _loadMainThread(config, onProgress) {
     const modelDef = config.models.primary;
+    onProgress?.({ percent: 10, status: `Loading ${modelDef.label}…`, fromCache: _loadedFromCache });
 
     _pipeline = await _pipelineFn(
       modelDef.task,
@@ -150,8 +170,12 @@ export const AIModule = (() => {
         device: 'wasm',
         progress_callback: (p) => {
           if (p.status === 'downloading') {
-            const pct = p.total > 0 ? Math.round((p.loaded / p.total) * 80) + 10 : 50;
-            const mb  = p.total > 0 ? `${(p.loaded/1e6).toFixed(0)}/${(p.total/1e6).toFixed(0)} MB` : '';
+            const pct = p.total > 0
+              ? Math.round((p.loaded / p.total) * 80) + 10
+              : 50;
+            const mb = p.total > 0
+              ? `${(p.loaded / 1e6).toFixed(0)}/${(p.total / 1e6).toFixed(0)} MB`
+              : '';
             onProgress?.({ percent: pct, status: `Downloading… ${mb}`, fromCache: false });
           } else if (p.status === 'loading') {
             onProgress?.({ percent: 92, status: 'Initialising…', fromCache: _loadedFromCache });
@@ -163,7 +187,7 @@ export const AIModule = (() => {
     return { modelLabel: modelDef.label, modelId: modelDef.id, fromCache: _loadedFromCache };
   }
 
-  // ── Public: load ───────────────────────────────────────────────────
+  // ── Public: load model ─────────────────────────────────────────────
   async function loadModel(config, onProgress) {
     if (_isReady || _isLoading) return;
     _isLoading = true;
@@ -177,16 +201,17 @@ export const AIModule = (() => {
 
       onProgress?.({
         percent:   cached ? 25 : 5,
-        status:    cached ? `Loading ${modelDef.label} from device…` : `Downloading ${modelDef.label}…`,
+        status:    cached
+          ? `Loading ${modelDef.label} from device…`
+          : `Downloading ${modelDef.label} (first time only)…`,
         fromCache: cached,
       });
 
-      // Try worker first; fall back to main thread
-      _useWorker = typeof Worker !== 'undefined';
+      // Try worker; fall back gracefully to main thread
+      _useWorker = _workerSupported() && _createWorker();
 
       let result;
       if (_useWorker) {
-        _createWorker();
         result = await _loadViaWorker(config, onProgress);
       } else {
         result = await _loadMainThread(config, onProgress);
@@ -199,7 +224,9 @@ export const AIModule = (() => {
 
       onProgress?.({
         percent:   100,
-        status:    cached ? `${result.modelLabel} ready (from device)` : `${result.modelLabel} saved ✓`,
+        status:    cached
+          ? `${result.modelLabel} ready (from device)`
+          : `${result.modelLabel} saved to device ✓`,
         fromCache: cached,
       });
 
@@ -216,10 +243,7 @@ export const AIModule = (() => {
     }
   }
 
-  // ── Preprocess image: canvas → RGBA bytes ─────────────────────────
-  // Done on main thread (has access to DOM) before sending to worker.
-  // This also fixes the Android OrtRun error — we never pass raw
-  // data URLs to the ONNX runtime anymore.
+  // ── Image preprocessing (main thread, has DOM access) ─────────────
   function _extractPixels(dataUrl) {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -232,10 +256,10 @@ export const AIModule = (() => {
           const ctx = canvas.getContext('2d', { willReadFrequently: true });
           ctx.drawImage(img, 0, 0, W, H);
           const { data } = ctx.getImageData(0, 0, W, H);
-          resolve({ pixels: data.buffer, width: W, height: H }); // transfer buffer
+          resolve({ pixels: data.buffer, width: W, height: H });
         } catch (e) { reject(e); }
       };
-      img.onerror = () => reject(new Error('Image failed to load'));
+      img.onerror = () => reject(new Error('Image load failed'));
       img.src = dataUrl;
     });
   }
@@ -244,9 +268,7 @@ export const AIModule = (() => {
   function _inferWorker(pixels, width, height, dataUrl, opts) {
     return new Promise((resolve, reject) => {
       const id = ++_inferIdCounter;
-      _inferCallbacks.set(id, { resolve, reject });
 
-      // Timeout: if worker doesn't respond in 45s, reject
       const timeout = setTimeout(() => {
         if (_inferCallbacks.has(id)) {
           _inferCallbacks.delete(id);
@@ -254,31 +276,28 @@ export const AIModule = (() => {
         }
       }, 45000);
 
-      const originalResolve = resolve;
       _inferCallbacks.set(id, {
-        resolve: (text) => { clearTimeout(timeout); originalResolve(text); },
+        resolve: (text) => { clearTimeout(timeout); resolve(text); },
         reject:  (err)  => { clearTimeout(timeout); reject(err); },
       });
 
-      // Transfer pixel buffer to worker (zero-copy, very fast)
       _worker.postMessage(
         { type: 'INFER', id, pixels, width, height, dataUrl, opts },
-        [pixels] // transferable — avoids copying large buffer
+        [pixels]
       );
     });
   }
 
-  // ── Infer via main thread (fallback) ──────────────────────────────
+  // ── Infer on main thread (fallback) ───────────────────────────────
   async function _inferMain(dataUrl, opts) {
     let input = dataUrl;
 
-    // Use RawImage if available
     if (_RawImage) {
       try {
         const { pixels, width, height } = await _extractPixels(dataUrl);
         input = new _RawImage(new Uint8ClampedArray(pixels), width, height, 4);
       } catch (e) {
-        console.warn('[AI] RawImage prep failed, using data URL:', e.message);
+        console.warn('[AI] Pixel extraction failed, using data URL:', e.message);
       }
     }
 
@@ -297,12 +316,11 @@ export const AIModule = (() => {
   async function _infer(imageDataUrl, opts = {}) {
     _assertReady();
     if (!imageDataUrl?.startsWith('data:image/')) {
-      throw new AIError('INVALID_INPUT', 'Invalid image.');
+      throw new AIError('INVALID_INPUT', 'Invalid image data.');
     }
 
     try {
       let text;
-
       if (_useWorker && _worker) {
         const { pixels, width, height } = await _extractPixels(imageDataUrl);
         text = await _inferWorker(pixels, width, height, imageDataUrl, opts);
@@ -311,19 +329,25 @@ export const AIModule = (() => {
       }
 
       if (!text?.trim()) {
-        throw new AIError('EMPTY_RESPONSE', 'No description. Try again with better lighting.');
+        throw new AIError('EMPTY_RESPONSE', 'No description returned. Try again.');
       }
-
       return text.trim();
 
     } catch (err) {
       if (err instanceof AIError) throw err;
-      throw new AIError('INFERENCE_FAILED',
-        `Could not process image: ${err.message}`);
+      // If worker fails mid-inference, try main thread once
+      if (_useWorker) {
+        console.warn('[AI] Worker inference failed, trying main thread:', err.message);
+        try {
+          const text = await _inferMain(imageDataUrl, opts);
+          if (text?.trim()) return text.trim();
+        } catch {}
+      }
+      throw new AIError('INFERENCE_FAILED', `Could not process image: ${err.message}`);
     }
   }
 
-  // ── Public inference methods ───────────────────────────────────────
+  // ── Public inference ───────────────────────────────────────────────
   async function describeScene(imageDataUrl, brief = false) {
     const text = await _infer(imageDataUrl, {
       max_new_tokens: brief ? 50 : 90,
@@ -347,14 +371,12 @@ export const AIModule = (() => {
     return { text: `Based on what I see: ${_tidy(text)}`, confidence: _conf(text) };
   }
 
-  function _tidy(t) { return (t || '').trim().replace(/\s+/g, ' '); }
-
-  function _conf(text) {
-    if (/\b(maybe|might|unclear|not sure)\b/i.test(text)) return 'low';
-    if (/\b(appears|seems|likely|probably)\b/i.test(text)) return 'medium';
+  function _tidy(t)  { return (t || '').trim().replace(/\s+/g, ' '); }
+  function _conf(t)  {
+    if (/\b(maybe|might|unclear|not sure)\b/i.test(t)) return 'low';
+    if (/\b(appears|seems|likely|probably)\b/i.test(t)) return 'medium';
     return 'high';
   }
-
   function _assertReady() {
     if (!_isReady) throw new AIError('NOT_READY', 'Model not ready yet. Please wait.');
   }
@@ -362,9 +384,9 @@ export const AIModule = (() => {
   return {
     setPipelineFn, loadModel, isModelCached,
     describeScene, readText, askQuestion,
-    get isReady()        { return _isReady; },
-    get modelId()        { return _modelId; },
-    get modelLabel()     { return _modelLabel; },
-    get loadedFromCache(){ return _loadedFromCache; },
+    get isReady()         { return _isReady; },
+    get modelId()         { return _modelId; },
+    get modelLabel()      { return _modelLabel; },
+    get loadedFromCache() { return _loadedFromCache; },
   };
 })();

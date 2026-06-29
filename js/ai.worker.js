@@ -1,45 +1,27 @@
 /**
- * Drishti — AI Web Worker v0.1.6
+ * Drishti — AI Web Worker v0.1.7
  *
- * WHY A WORKER:
- * iOS Safari kills the main thread if it runs heavy CPU (WASM inference)
- * for more than ~30 seconds. Moving inference to a Web Worker means:
- *   - The main thread stays responsive (UI, camera, speech never freeze)
- *   - iOS watchdog targets the worker thread, not the page itself
- *   - If the worker is killed, we restart it without reloading the app
- *   - Inference runs in parallel — UI never blocks
+ * FIX: importScripts() from jsdelivr CDN is blocked by GitHub Pages
+ * CORS headers when called from a Worker context.
  *
- * This worker is loaded by ai.js via: new Worker('js/ai.worker.js')
- * It communicates via postMessage / onmessage.
+ * Solution: Use dynamic import() inside the worker instead.
+ * ES module workers (type:'module') support import() and are not
+ * blocked by the same CORS rules as importScripts().
  *
- * Message protocol:
- *   Main → Worker: { type: 'LOAD', modelId, modelTask }
- *                  { type: 'INFER', id, imageData, opts }
- *   Worker → Main: { type: 'PROGRESS', percent, status }
- *                  { type: 'LOAD_OK', modelLabel }
- *                  { type: 'LOAD_ERR', message }
- *                  { type: 'INFER_OK', id, text }
- *                  { type: 'INFER_ERR', id, message }
+ * This file is loaded as: new Worker('js/ai.worker.js', {type:'module'})
  */
 
-'use strict';
+import {
+  pipeline,
+  env,
+  RawImage,
+} from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.2';
 
-// Import Transformers.js inside the worker
-// Workers have their own scope — no window, but importScripts works
-importScripts('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.2/dist/transformers.min.js');
+env.allowRemoteModels = true;
+env.useBrowserCache   = true;
 
-let _pipeline  = null;
-let _RawImage  = null;
-let _isReady   = false;
-
-// Grab pipeline and RawImage from the global scope after importScripts
-// In worker scope, Transformers.js exposes these as globals
-const { pipeline, RawImage, env } = self.transformers || {};
-
-if (env) {
-  env.allowRemoteModels = true;
-  env.useBrowserCache   = true;
-}
+let _pipeline = null;
+let _isReady  = false;
 
 self.onmessage = async (e) => {
   const msg = e.data;
@@ -47,8 +29,6 @@ self.onmessage = async (e) => {
   // ── LOAD ──────────────────────────────────────────────────────────
   if (msg.type === 'LOAD') {
     try {
-      _RawImage = RawImage;
-
       _pipeline = await pipeline(
         msg.modelTask,
         msg.modelId,
@@ -70,10 +50,8 @@ self.onmessage = async (e) => {
           },
         }
       );
-
       _isReady = true;
       self.postMessage({ type: 'LOAD_OK', modelLabel: msg.modelLabel });
-
     } catch (err) {
       self.postMessage({ type: 'LOAD_ERR', message: err.message });
     }
@@ -86,20 +64,11 @@ self.onmessage = async (e) => {
       self.postMessage({ type: 'INFER_ERR', id: msg.id, message: 'Model not ready' });
       return;
     }
-
     try {
-      // Reconstruct RawImage from the transferred pixel data
       let input;
-      if (msg.pixels && _RawImage) {
-        // Pixels transferred as Uint8ClampedArray — works on all platforms
-        input = new _RawImage(
-          new Uint8ClampedArray(msg.pixels),
-          msg.width,
-          msg.height,
-          4 // RGBA
-        );
+      if (msg.pixels) {
+        input = new RawImage(new Uint8ClampedArray(msg.pixels), msg.width, msg.height, 4);
       } else {
-        // Fallback: use the data URL (iOS usually fine with this in a worker)
         input = msg.dataUrl;
       }
 
@@ -114,10 +83,8 @@ self.onmessage = async (e) => {
         : (result?.generated_text   ?? '');
 
       self.postMessage({ type: 'INFER_OK', id: msg.id, text: text.trim() });
-
     } catch (err) {
       self.postMessage({ type: 'INFER_ERR', id: msg.id, message: err.message });
     }
-    return;
   }
 };
