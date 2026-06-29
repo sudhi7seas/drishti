@@ -83,13 +83,18 @@ export const UIModule = (() => {
 
   function hideSplash(instant = false) {
     const splash = document.getElementById('splash');
-    const app = document.getElementById('app');
+    const app    = document.getElementById('app');
     if (!splash) return;
-    if (instant) { splash.style.display = "none"; app?.classList.remove("hidden"); return; } splash.classList.add("fade-out");
+    if (instant) {
+      splash.style.display = 'none';
+      app?.classList.remove('hidden');
+      return;
+    }
+    splash.classList.add('fade-out');
     setTimeout(() => {
       splash.style.display = 'none';
       app?.classList.remove('hidden');
-      announce('Drishti is ready. Tap the describe button to describe what the camera sees.', 'polite');
+      announce('Drishti is ready. Tap Describe to start.', 'polite');
     }, 400);
   }
 

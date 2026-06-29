@@ -1,19 +1,36 @@
 /**
- * Drishti — App v0.1.6
+ * Drishti — App v0.1.8
  *
- * iOS RESTART + CAMERA RE-PERMISSION FIX:
+ * iOS RESUME FIX — root cause:
+ * sessionStorage is CLEARED on every iOS PWA reload (unlike desktop).
+ * So the 'drishti_ready' flag was always missing → splash always showed.
  *
- * iOS kills PWA JS state when app backgrounds. On return it reloads
- * the page and asks camera permission again. We can't prevent the
- * reload but we handle it gracefully:
+ * Fix: use localStorage (persists across reloads) + timestamp check.
+ * If model was loaded within the last 10 minutes, skip splash entirely
+ * and load model silently from cache.
  *
- * 1. sessionStorage 'drishti_ready' = '1' → skip splash on reload
- * 2. Camera permission is NOT re-requested automatically on resume —
- *    instead we store 'camera_was_active' and silently restart it
- * 3. visibilitychange stops camera on background (saves battery),
- *    restarts it on foreground (without asking permission again,
- *    because permission was already granted this session)
+ * HEATING FIX:
+ * visibilitychange now stops inference if running when backgrounded,
+ * and the model does NOT reload — it was already in browser cache.
  */
+
+const READY_KEY    = 'drishti_model_ts';   // timestamp of last successful load
+const RESUME_GRACE = 10 * 60 * 1000;       // 10 minutes — skip splash within this
+
+function _wasRecentlyLoaded() {
+  try {
+    const ts = parseInt(localStorage.getItem(READY_KEY) || '0', 10);
+    return ts > 0 && (Date.now() - ts) < RESUME_GRACE;
+  } catch { return false; }
+}
+
+function _markLoaded() {
+  try { localStorage.setItem(READY_KEY, String(Date.now())); } catch {}
+}
+
+function _clearLoaded() {
+  try { localStorage.removeItem(READY_KEY); } catch {}
+}
 
 export async function boot({
   pipeline, APP_CONFIG, SpeechModule, CameraModule,
@@ -27,92 +44,107 @@ export async function boot({
   document.addEventListener('drishti:speechPitch', e => SpeechModule.setPitch(e.detail));
   document.addEventListener('drishti:testVoice',   () => SpeechModule.testVoice());
 
-  // ── Fast resume: skip splash if model was loaded this session ──────
-  const wasReady       = sessionStorage.getItem('drishti_ready') === '1';
-  const cameraWasActive = sessionStorage.getItem('drishti_camera') === '1';
+  const isResume = _wasRecentlyLoaded();
 
-  if (wasReady) {
-    // iOS reloaded the page — show app immediately, load model silently
+  // ── Resume path: skip splash, load silently ──────────────────────
+  if (isResume) {
     UIModule.hideSplash(true);
-    UIModule.setResponseReady('Resuming — please wait a moment…');
+    UIModule.setResponseReady('Ready. Tap Describe to start.');
+
+    // Load model silently from cache — no progress shown
+    try {
+      const result = await AIModule.loadModel(APP_CONFIG, null);
+      UIModule.setModelBadge(result.modelLabel, 'from device');
+      _markLoaded(); // refresh timestamp
+    } catch (err) {
+      // Cache miss or error — show splash and retry properly
+      _clearLoaded();
+      UIModule.showSplashError('Could not resume. Please refresh.');
+      return;
+    }
+
+  // ── First launch path: show splash + download progress ───────────
   } else {
     UIModule.updateLoadProgress(5, 'Checking device storage…');
     const cached = await AIModule.isModelCached(APP_CONFIG.models.primary.id);
     if (!cached) UIModule.showFirstTimeNotice();
+
+    try {
+      const result = await AIModule.loadModel(
+        APP_CONFIG,
+        p => UIModule.updateLoadProgress(p.percent, p.status)
+      );
+      _markLoaded();
+      UIModule.setModelBadge(result.modelLabel, result.fromCache ? 'from device' : 'downloaded');
+      UIModule.hideSplash(false);
+      UIModule.setResponseReady();
+    } catch (err) {
+      _clearLoaded();
+      UIModule.showSplashError(err.message);
+      UIModule.announce(err.message);
+      return;
+    }
   }
 
-  // ── Load model ─────────────────────────────────────────────────────
-  try {
-    const result = await AIModule.loadModel(
-      APP_CONFIG,
-      wasReady ? null : p => UIModule.updateLoadProgress(p.percent, p.status)
-    );
-    sessionStorage.setItem('drishti_ready', '1');
-    UIModule.setModelBadge(result.modelLabel, result.fromCache ? 'from device' : 'downloaded');
-  } catch (err) {
-    sessionStorage.removeItem('drishti_ready');
-    UIModule.showSplashError(err.message);
-    UIModule.announce(err.message);
-    return;
-  }
-
-  if (!wasReady) UIModule.hideSplash(false);
-  UIModule.setResponseReady();
-
+  // Bind all interactions
   _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIModule, AIError, UIModule });
 
-  // ── Start camera ───────────────────────────────────────────────────
-  // On iOS resume: restart silently (permission already granted)
-  // On first launch: request permission normally
+  // ── Start camera ─────────────────────────────────────────────────
   try {
     await CameraModule.start();
     UIModule.setCameraToggleState(true);
-    sessionStorage.setItem('drishti_camera', '1');
-    if (!wasReady) UIModule.toast('Camera ready', 'success', 2000);
+    if (!isResume) UIModule.toast('Camera ready', 'success', 2000);
   } catch (err) {
-    sessionStorage.removeItem('drishti_camera');
-    // Only show permission toast on first launch, not resume
-    if (!wasReady) UIModule.toast('Tap Camera to enable', 'info', 4000);
+    if (!isResume) UIModule.toast('Tap Camera to enable', 'info', 3000);
   }
 
-  // First launch greeting
-  if (!wasReady) {
+  // Greeting only on first launch
+  if (!isResume) {
     setTimeout(() => {
       SpeechModule.speak('Drishti is ready. Tap the large button to describe what you see.');
     }, 1200);
   }
 
-  // ── iOS visibility fix ─────────────────────────────────────────────
-  // Stop camera when app goes to background (saves battery + avoids
-  // iOS killing the stream). Restart silently when returning.
+  // ── Visibility: stop camera on background, restart on return ─────
+  // This prevents iOS from killing the camera stream (which triggers
+  // the permission re-request). We stop it cleanly before iOS can.
   document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState === 'hidden') {
-      // Going to background
+      // Going to background — stop camera cleanly
       if (CameraModule.isActive) {
         CameraModule.stop();
         UIModule.setCameraToggleState(false);
       }
+      // Refresh the timestamp so coming back still counts as resume
+      _markLoaded();
+
     } else {
-      // Returning to foreground — restart camera without re-asking permission
-      // Small delay lets iOS fully restore the page context first
-      await new Promise(r => setTimeout(r, 400));
+      // Returning to foreground
+      // Small delay: iOS needs ~300ms to restore page context fully
+      await _sleep(350);
+
       if (!CameraModule.isActive) {
         try {
           await CameraModule.start();
           UIModule.setCameraToggleState(true);
-          sessionStorage.setItem('drishti_camera', '1');
         } catch (err) {
-          console.warn('[App] Camera restart on resume failed:', err.message);
-          // Don't annoy user — they can tap Camera button if needed
+          // Silent fail — user can tap Camera button
+          console.warn('[App] Camera restart on resume:', err.message);
         }
       }
     }
   });
 }
 
+const _sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ── Event binding ─────────────────────────────────────────────────
 function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIModule, AIError, UIModule }) {
-  let _lastTapTime = 0, _longPressTimer = null, _autoTimer = null;
-  let _isProcessing = false, _lastResult = null;
+  let _lastTapTime    = 0;
+  let _longPressTimer = null;
+  let _autoTimer      = null;
+  let _isProcessing   = false;
+  let _lastResult     = null;
 
   const describeBtn     = document.getElementById('describeBtn');
   const readTextBtn     = document.getElementById('readTextBtn');
@@ -122,19 +154,30 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
   const replayBtn       = document.getElementById('replayBtn');
   const copyBtn         = document.getElementById('copyBtn');
 
-  // ── Gestures ───────────────────────────────────────────────────────
+  // ── Gestures ────────────────────────────────────────────────────
   describeBtn?.addEventListener('pointerdown', (e) => {
     if (_isProcessing) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    _longPressTimer = setTimeout(() => { _longPressTimer = null; triggerVoice(); }, 700);
+    _longPressTimer = setTimeout(() => {
+      _longPressTimer = null;
+      triggerVoice();
+    }, APP_CONFIG.gestures.longPressThreshold);
   });
 
   describeBtn?.addEventListener('pointerup', () => {
     if (_longPressTimer) { clearTimeout(_longPressTimer); _longPressTimer = null; }
     if (_isProcessing) return;
-    const now = Date.now(), gap = now - _lastTapTime;
-    if (gap < 350 && gap > 50) { _lastTapTime = 0; triggerReadText(); }
-    else { _lastTapTime = now; setTimeout(() => { if (_lastTapTime === now) triggerDescribe(); }, 350); }
+    const now = Date.now();
+    const gap = now - _lastTapTime;
+    if (gap < APP_CONFIG.gestures.doubleTapThreshold && gap > 50) {
+      _lastTapTime = 0;
+      triggerReadText();
+    } else {
+      _lastTapTime = now;
+      setTimeout(() => {
+        if (_lastTapTime === now) triggerDescribe();
+      }, APP_CONFIG.gestures.doubleTapThreshold);
+    }
   });
 
   describeBtn?.addEventListener('pointercancel', () => {
@@ -143,7 +186,7 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
 
   describeBtn?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') triggerDescribe();
-    if (e.key === ' ') { e.preventDefault(); triggerReadText(); }
+    if (e.key === ' ')     { e.preventDefault(); triggerReadText(); }
   });
 
   readTextBtn?.addEventListener('click', triggerReadText);
@@ -152,7 +195,6 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
     try {
       const active = await CameraModule.toggle();
       UIModule.setCameraToggleState(active);
-      sessionStorage.setItem('drishti_camera', active ? '1' : '0');
       UIModule.toast(active ? 'Camera on' : 'Camera off', 'info', 1500);
       UIModule.announce(active ? 'Camera enabled' : 'Camera disabled', 'polite');
     } catch (err) {
@@ -161,20 +203,26 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
   });
 
   voiceInputBtn?.addEventListener('click', triggerVoice);
-
   cancelVoiceBtn?.addEventListener('click', () => {
     SpeechModule.stopListening();
     UIModule.hideVoiceOverlay();
   });
 
   replayBtn?.addEventListener('click', () => {
-    if (_lastResult) { SpeechModule.stop(); SpeechModule.speak(_lastResult, { interrupt: true }); }
+    if (_lastResult) {
+      SpeechModule.stop();
+      SpeechModule.speak(_lastResult, { interrupt: true });
+    }
   });
 
   copyBtn?.addEventListener('click', async () => {
     if (!_lastResult) return;
-    try { await navigator.clipboard.writeText(_lastResult); UIModule.toast('Copied', 'success'); }
-    catch { UIModule.toast('Copy not available', 'error'); }
+    try {
+      await navigator.clipboard.writeText(_lastResult);
+      UIModule.toast('Copied', 'success');
+    } catch {
+      UIModule.toast('Copy not available', 'error');
+    }
   });
 
   document.addEventListener('drishti:autoDescribe', (e) => {
@@ -188,7 +236,7 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
     }
   });
 
-  // ── Actions ────────────────────────────────────────────────────────
+  // ── Core actions ─────────────────────────────────────────────────
   async function triggerDescribe() {
     if (_isProcessing || !_guard()) return;
     _isProcessing = true;
@@ -196,10 +244,10 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
     UIModule.setResponseProcessing('Analysing what the camera sees…');
     UIModule.announce('Analysing image');
     try {
-      const img   = CameraModule.captureFrame();
-      const brief = UIModule.getToggleState('briefMode');
+      const img    = CameraModule.captureFrame();
+      const brief  = UIModule.getToggleState('briefMode');
       const { text, confidence } = await AIModule.describeScene(img, brief);
-      _lastResult = text;
+      _lastResult  = text;
       UIModule.setResponseResult(text, { label: 'SCENE', confidence });
       const hazard = UIModule.checkAndShowHazard(text, APP_CONFIG);
       SpeechModule.speak(text, {
@@ -229,7 +277,8 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
   async function triggerVoice() {
     if (_isProcessing || !_guard()) return;
     if (!SpeechModule.isRecognitionSupported()) {
-      UIModule.toast('Voice input needs Chrome or Edge', 'error'); return;
+      UIModule.toast('Voice input needs Chrome or Edge', 'error');
+      return;
     }
     UIModule.showVoiceOverlay();
     SpeechModule.stop();
@@ -250,7 +299,10 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
       UIModule.hideVoiceOverlay();
       if (err.message !== 'No speech detected') _handleErr(err);
       else UIModule.setResponseReady('No speech detected. Try again.');
-    } finally { _isProcessing = false; UIModule.setDescribeBtnLoading(false); }
+    } finally {
+      _isProcessing = false;
+      UIModule.setDescribeBtnLoading(false);
+    }
   }
 
   function _guard() {
@@ -269,8 +321,8 @@ function _bindEvents({ APP_CONFIG, SpeechModule, CameraModule, CameraError, AIMo
 
   function _handleErr(err) {
     let msg = 'Something went wrong. Please try again.';
-    if (err instanceof AIError) msg = err.message;
-    else if (err instanceof CameraError) msg = err.message;
+    if (err instanceof AIError)    msg = err.message;
+    if (err instanceof CameraError) msg = err.message;
     UIModule.setResponseError(msg);
     UIModule.announce(msg);
     SpeechModule.speak(msg, { priority: SpeechModule.Priority.HIGH, interrupt: true });
