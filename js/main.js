@@ -1,33 +1,29 @@
 /**
- * SeeForMe / Drishti — ES Module Entry Point
+ * Drishti — Entry Point v0.1.6
  *
- * ROOT CAUSE FIX:
- * Transformers.js v3 is an ES Module. It CANNOT be loaded as a
- * traditional <script> tag and accessed via `window.transformers`.
- * It must be imported using: import { pipeline } from '...'
- *
- * This file is the single ES module entry point. It imports everything
- * in the correct order, then boots the app.
+ * Imports Transformers.js as ES module.
+ * Passes pipeline + RawImage to AIModule for main-thread fallback.
+ * Primary inference runs in ai.worker.js (Web Worker).
  */
 
-// ── 1. Import Transformers.js (the library that runs AI in browser) ──
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.2';
+import {
+  pipeline,
+  env,
+  RawImage,
+} from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.2';
 
-// ── 2. Configure Transformers.js ──
-// Allow remote model downloads (needed for first-time setup)
 env.allowRemoteModels = true;
-// Use browser cache (Cache Storage API) — models persist across sessions
-env.useBrowserCache = true;
+env.useBrowserCache   = true;
 
-// ── 3. Import our app modules (in dependency order) ──
-import { APP_CONFIG }   from './config.js';
-import { SpeechModule } from './speech.js';
+import { APP_CONFIG }                from './config.js';
+import { SpeechModule }              from './speech.js';
 import { CameraModule, CameraError } from './camera.js';
-import { AIModule, AIError } from './ai.js';
-import { UIModule }     from './ui.js';
+import { AIModule, AIError }         from './ai.js';
+import { UIModule }                  from './ui.js';
+import { boot }                      from './app.js';
 
-// ── 4. Boot the app ──
-import { boot } from './app.js';
+// Provide pipeline + RawImage for main-thread fallback
+// (used only if Web Workers are unavailable)
+AIModule.setPipelineFn(pipeline, RawImage);
 
-// Start everything — pass the pipeline function into AIModule
 boot({ pipeline, APP_CONFIG, SpeechModule, CameraModule, CameraError, AIModule, AIError, UIModule });
